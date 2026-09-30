@@ -4,7 +4,16 @@ export const DEFAULT_ZOOM = 11;
 // Delhi NCR: west, south, east, north.
 export const NCR_BBOX = { west: 76.6, south: 27.9, east: 77.8, north: 29.2 } as const;
 
+// Satellite fire search box: Punjab, Haryana, Delhi and western UP — the crop-burning belt upwind of NCR.
+export const FIRE_BBOX = { west: 73.5, south: 26.5, east: 80.5, north: 32.6 } as const;
+
 export type LatLng = { lat: number; lng: number };
+
+/** Smallest absolute difference between two compass bearings, 0–180. */
+export function angleDiff(a: number, b: number): number {
+  const d = Math.abs((((a - b) % 360) + 360) % 360);
+  return d > 180 ? 360 - d : d;
+}
 
 export function haversineKm(a: LatLng, b: LatLng): number {
   const R = 6371.0088;

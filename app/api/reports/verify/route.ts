@@ -12,6 +12,7 @@ import { COPY, hardFailMessage, type Lang } from "@/lib/copy";
 import { getHotspots, hotspotsNear } from "@/lib/firms";
 import { checkPhoto, type CheckerError } from "@/lib/gemini";
 import { haversineKm, isValidLatLng } from "@/lib/geo";
+import { getNews, newsArea } from "@/lib/news";
 import { publishReport, UUID_RE } from "@/lib/reports";
 import { EVIDENCE_BUCKET, supabaseAdmin } from "@/lib/supabase/server";
 
@@ -130,10 +131,11 @@ export async function POST(req: NextRequest) {
   }
 
   const pin = { lat: report.lat as number, lng: report.lng as number };
-  const [exif, hotspots, prev] = await Promise.all([
+  const [exif, hotspots, prev, news] = await Promise.all([
     readExif(bytes),
     getHotspots().catch(() => []),
     sb.from("report_attempts").select("hard_fail_reason").eq("report_id", report.id).lt("attempt_no", attemptNo),
+    getNews(newsArea(report.place_name)).catch(() => null),
   ]);
   const fires = hotspotsNear(hotspots, pin, 15, 48).slice(0, 5);
   const exifKm = exif.gps ? haversineKm(pin, exif.gps) : null;
@@ -148,6 +150,7 @@ export async function POST(req: NextRequest) {
     exif: exif.gps,
     exifTakenAt: exif.takenAt,
     replyLanguage: lang,
+    news: (news?.articles ?? []).slice(0, 5).map((a) => a.title),
     fires: fires.map((f) => ({
       distance_km: Math.round(f.km * 10) / 10,
       frp: f.frp,

@@ -12,7 +12,12 @@ const OPEN_METEO_AIR = () => process.env.AIR_QUALITY_OPEN_METEO_BASE || "https:/
 export type AirSource = "google_air_quality" | "open_meteo_cams";
 
 type HourPoint = { at: string; pm25: number };
-type SourceReading = { pm25: number; observedAt: string; hourly: HourPoint[] };
+
+export type PollutantCode = "pm25" | "pm10" | "no2" | "o3" | "co" | "so2";
+export type Pollutant = { code: PollutantCode; value: number; unit: "µg/m³" | "ppb" };
+const POLLUTANT_ORDER: PollutantCode[] = ["pm25", "pm10", "no2", "o3", "co", "so2"];
+
+type SourceReading = { pm25: number; observedAt: string; hourly: HourPoint[]; pollutants: Pollutant[] };
 
 export type Estimate = { pm25: number; modelVersion: string; observationDate: string };
 
@@ -31,6 +36,10 @@ export type AirResponse = {
   windFromDeg: number | null;
   windKmh: number | null;
   estimate: Estimate | null;
+  pollutants: Pollutant[];
+  /** Next 24 h of PM2.5 from the same source, with our hourly sub-index. */
+  hourly: { at: string; pm25: number; aqi: number }[];
+  temperatureC: number | null;
 };
 
 type GooglePollutant = { code: string; concentration?: { value: number; units: string } };
@@ -45,10 +54,24 @@ function googlePm25(pollutants: GooglePollutant[] | undefined): number | null {
   return Number.isFinite(v) && v >= 0 ? v : null;
 }
 
-async function googleCurrent(lat: number, lng: number): Promise<{ pm25: number; observedAt: string } | null> {
+function googlePollutants(list: GooglePollutant[] | undefined): Pollutant[] {
+  const out: Pollutant[] = [];
+  for (const code of POLLUTANT_ORDER) {
+    const p = list?.find((x) => x.code === code);
+    const v = Number(p?.concentration?.value);
+    if (!p?.concentration || !Number.isFinite(v)) continue;
+    const unit = p.concentration.units === "MICROGRAMS_PER_CUBIC_METER" ? "µg/m³" : p.concentration.units === "PARTS_PER_BILLION" ? "ppb" : null;
+    if (unit) out.push({ code, value: v, unit });
+  }
+  return out;
+}
+
+type GoogleNow = { pm25: number; observedAt: string; pollutants: Pollutant[] };
+
+async function googleCurrent(lat: number, lng: number): Promise<GoogleNow | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return null;
-  return cached(`gaq_current:${cellKey(lat, lng)}:${hourBucket()}`, "google_current", AIR_TTL, async () => {
+  return cached(`gaq_current:v2:${cellKey(lat, lng)}:${hourBucket()}`, "google_current", AIR_TTL, async () => {
     const data = await fetchJson<GoogleCurrent>(
       `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${key}`,
       {
@@ -63,7 +86,9 @@ async function googleCurrent(lat: number, lng: number): Promise<{ pm25: number; 
       },
     );
     const pm25 = googlePm25(data.pollutants);
-    return pm25 === null ? null : { pm25, observedAt: new Date(data.dateTime).toISOString() };
+    return pm25 === null
+      ? null
+      : { pm25, observedAt: new Date(data.dateTime).toISOString(), pollutants: googlePollutants(data.pollutants) };
   });
 }
 
@@ -94,9 +119,19 @@ async function googleForecast(lat: number, lng: number): Promise<HourPoint[]> {
   return result ?? [];
 }
 
+type OpenMeteoCurrent = {
+  time: string;
+  pm2_5: number | null;
+  pm10?: number | null;
+  nitrogen_dioxide?: number | null;
+  ozone?: number | null;
+  carbon_monoxide?: number | null;
+  sulphur_dioxide?: number | null;
+};
+
 type OpenMeteoAir = {
   utc_offset_seconds: number;
-  current?: { time: string; pm2_5: number | null };
+  current?: OpenMeteoCurrent;
   hourly?: { time: string[]; pm2_5: (number | null)[] };
 };
 
@@ -106,19 +141,32 @@ function omTimeToIso(local: string, offsetSeconds: number): string {
 }
 
 export async function openMeteoAir(lat: number, lng: number): Promise<SourceReading | null> {
-  return cached(`om_air:${cellKey(lat, lng)}:${hourBucket()}`, "open_meteo_air", AIR_TTL, async () => {
+  return cached(`om_air:v2:${cellKey(lat, lng)}:${hourBucket()}`, "open_meteo_air", AIR_TTL, async () => {
     const url =
       `${OPEN_METEO_AIR()}/v1/air-quality?latitude=${lat}&longitude=${lng}` +
-      `&current=pm2_5,pm10,us_aqi&hourly=pm2_5,pm10&forecast_days=2&timezone=Asia%2FKolkata`;
+      `&current=pm2_5,pm10,us_aqi,nitrogen_dioxide,ozone,carbon_monoxide,sulphur_dioxide` +
+      `&hourly=pm2_5,pm10&forecast_days=2&timezone=Asia%2FKolkata`;
     const data = await fetchJson<OpenMeteoAir>(url);
-    const pm25 = data.current?.pm2_5;
-    if (pm25 === null || pm25 === undefined || !Number.isFinite(pm25)) return null;
+    const c = data.current;
+    const pm25 = c?.pm2_5;
+    if (!c || pm25 === null || pm25 === undefined || !Number.isFinite(pm25)) return null;
     const hourly: HourPoint[] = [];
     data.hourly?.time.forEach((t, i) => {
       const v = data.hourly?.pm2_5[i];
       if (v !== null && v !== undefined) hourly.push({ at: omTimeToIso(t, data.utc_offset_seconds), pm25: v });
     });
-    return { pm25, observedAt: omTimeToIso(data.current!.time, data.utc_offset_seconds), hourly };
+    const raw: [PollutantCode, number | null | undefined][] = [
+      ["pm25", c.pm2_5],
+      ["pm10", c.pm10],
+      ["no2", c.nitrogen_dioxide],
+      ["o3", c.ozone],
+      ["co", c.carbon_monoxide],
+      ["so2", c.sulphur_dioxide],
+    ];
+    const pollutants = raw
+      .filter((r): r is [PollutantCode, number] => typeof r[1] === "number" && Number.isFinite(r[1]))
+      .map(([code, value]) => ({ code, value, unit: "µg/m³" as const }));
+    return { pm25, observedAt: omTimeToIso(c.time, data.utc_offset_seconds), hourly, pollutants };
   });
 }
 
@@ -131,6 +179,15 @@ function aboutSixHoursAhead(hours: HourPoint[]): HourPoint | null {
     if (d <= 90 * 60 * 1000 && (!best || d < Math.abs(new Date(best.at).getTime() - target))) best = h;
   }
   return best;
+}
+
+function next24h(hours: HourPoint[]): HourPoint[] {
+  const now = Date.now() - 30 * 60 * 1000;
+  const end = now + 24.5 * 3600 * 1000;
+  return hours.filter((h) => {
+    const t = new Date(h.at).getTime();
+    return t >= now && t <= end;
+  });
 }
 
 type Weather = { windKmh: number; windFromDeg: number; temperatureC: number };
@@ -179,21 +236,44 @@ export async function getEstimate(lat: number, lng: number): Promise<Estimate | 
   };
 }
 
-export type LiveReading = { source: AirSource; pm25: number; observedAt: string; forecast: HourPoint | null };
+export type LiveReading = {
+  source: AirSource;
+  pm25: number;
+  observedAt: string;
+  forecast: HourPoint | null;
+  hourly: HourPoint[];
+  pollutants: Pollutant[];
+};
 
 export async function getLiveReading(lat: number, lng: number): Promise<LiveReading | null> {
   try {
     const g = await googleCurrent(lat, lng);
     if (g) {
       const hours = await googleForecast(lat, lng);
-      return { source: "google_air_quality", pm25: g.pm25, observedAt: g.observedAt, forecast: aboutSixHoursAhead(hours) };
+      return {
+        source: "google_air_quality",
+        pm25: g.pm25,
+        observedAt: g.observedAt,
+        forecast: aboutSixHoursAhead(hours),
+        hourly: next24h(hours),
+        pollutants: g.pollutants,
+      };
     }
   } catch {
     // Fall through to CAMS.
   }
   try {
     const om = await openMeteoAir(lat, lng);
-    if (om) return { source: "open_meteo_cams", pm25: om.pm25, observedAt: om.observedAt, forecast: aboutSixHoursAhead(om.hourly) };
+    if (om) {
+      return {
+        source: "open_meteo_cams",
+        pm25: om.pm25,
+        observedAt: om.observedAt,
+        forecast: aboutSixHoursAhead(om.hourly),
+        hourly: next24h(om.hourly),
+        pollutants: om.pollutants,
+      };
+    }
   } catch {
     // Total failure handled by caller.
   }
@@ -228,6 +308,9 @@ export function toAirResponse(
     windFromDeg: weather ? Math.round(weather.windFromDeg) : null,
     windKmh: weather ? Math.round(weather.windKmh) : null,
     estimate,
+    pollutants: live.pollutants.map((p) => ({ ...p, value: Math.round(p.value * 10) / 10 })),
+    hourly: live.hourly.map((h) => ({ at: h.at, pm25: Math.round(h.pm25), aqi: pm25SubIndex(h.pm25) })),
+    temperatureC: weather && Number.isFinite(weather.temperatureC) ? Math.round(weather.temperatureC) : null,
   };
 }
 

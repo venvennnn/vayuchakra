@@ -1,9 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildContextSentence, getWeather, windCompass } from "@/lib/air";
 import type { Lang } from "@/lib/copy";
-import { getHotspots, hotspotsNear } from "@/lib/firms";
+import { getHotspots, hotspotsNear, upwindFires } from "@/lib/firms";
 import { bearingDeg, compassFromDeg, parseLatLng } from "@/lib/geo";
 import { reportsNear, UUID_RE } from "@/lib/reports";
+import { getStations, nearestStation } from "@/lib/stations";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,13 @@ export async function GET(req: NextRequest) {
   const token = sp.get("filerToken");
   const filerToken = token && UUID_RE.test(token) ? token : null;
 
-  const [reports, hotspots, weather] = await Promise.all([
+  const [reports, hotspots, weather, stations] = await Promise.all([
     reportsNear(p, 5, filerToken).catch(() => ({ available: false, checked: [], mine: [] })),
     getHotspots().catch(() => []),
     getWeather(p.lat, p.lng),
+    getStations().catch(() => null),
   ]);
+  const station = stations ? nearestStation(stations, p) : null;
 
   const nearestFire = hotspotsNear(hotspots, p, 20)[0] ?? null;
   const fire = nearestFire
@@ -49,6 +52,21 @@ export async function GET(req: NextRequest) {
     reports: reports.checked.slice(0, 3).map(round),
     mine: reports.mine.slice(0, 3).map(round),
     fire,
+    fireCounts: {
+      within50km: hotspotsNear(hotspots, p, 50).length,
+      upwind: upwindFires(hotspots, p, weather?.windFromDeg ?? null).length,
+    },
+    station:
+      station && station.km <= 50
+        ? {
+            name: station.name,
+            city: station.city,
+            aqi: station.aqi,
+            dominant: station.dominant,
+            updatedAt: station.updatedAt,
+            km: Math.round(station.km * 10) / 10,
+          }
+        : null,
     windKmh,
     windFrom,
     sentence,

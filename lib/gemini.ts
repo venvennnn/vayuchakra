@@ -45,6 +45,8 @@ export type GeminiInput = {
   /** Language for retry_reason, which is shown to the filer. */
   replyLanguage: "en" | "hi";
   fires: { distance_km: number; frp: number | null; confidence: string; acquired_at: string }[];
+  /** Recent local pollution headlines. Background only; they never change the score rules. */
+  news: string[];
 };
 
 /** Why the checker could not run. Shown to the filer as a code and stored on the attempt. */
@@ -95,9 +97,11 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
     exif_gps: input.exif ? { latitude: input.exif.lat, longitude: input.exif.lng } : null,
     exif_time: input.exifTakenAt,
     nearby_fires: input.fires,
+    recent_local_news_headlines: input.news,
   };
   const prompt =
     `Judge this photo. The note may be in Hindi or English.\n` +
+    `News headlines are background only: judge what the photo itself shows, never what the news says.\n` +
     `Context:\n${JSON.stringify(context, null, 2)}\n\n` +
     `Return one JSON object with exactly these keys:\n${SCHEMA_HINT}\n` +
     `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
