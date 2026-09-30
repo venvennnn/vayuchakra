@@ -1,6 +1,8 @@
 import "server-only";
 import { GoogleGenAI } from "@google/genai";
+import { ApiError } from "@google/genai";
 import { cached } from "./cache";
+import { markModelNotFound, markModelWorking, modelCandidates } from "./geminiModel";
 import type { Lang } from "./copy";
 import type { Article } from "./news";
 
@@ -74,7 +76,6 @@ function normalize(raw: unknown, articleCount: number): Omit<Insight, "model" | 
 async function generate(input: InsightInput): Promise<Insight | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const ai = new GoogleGenAI({ apiKey });
   const headlines = input.articles.slice(0, 8).map((a, i) => `${i + 1}. ${a.title}${a.source ? ` (${a.source}` : ""}${a.publishedAt ? `, ${a.publishedAt.slice(0, 10)})` : a.source ? ")" : ""}`);
   const evidence = {
@@ -90,6 +91,24 @@ async function generate(input: InsightInput): Promise<Insight | null> {
     `Return JSON: {"summary": "two short sentences", "causes": [{"key": "${CAUSES.join(" | ")}", "label": "2-4 words", "evidence": "one short sentence", "articles": [1]}], "confidence": "low | medium | high"}.\n` +
     `Give at most 3 causes, most likely first. Write summary, label and evidence in ${input.lang === "hi" ? "Hindi" : "English"}.`;
 
+  for await (const model of modelCandidates(apiKey)) {
+    const r = await callModel(ai, model, input, prompt, headlines.length);
+    if (r !== "not_found") {
+      if (r) markModelWorking(model);
+      return r;
+    }
+    markModelNotFound(model);
+  }
+  return null;
+}
+
+async function callModel(
+  ai: GoogleGenAI,
+  model: string,
+  input: InsightInput,
+  prompt: string,
+  articleCount: number,
+): Promise<Insight | null | "not_found"> {
   for (let i = 0; i < 2; i++) {
     try {
       const res = await ai.models.generateContent({
@@ -102,9 +121,10 @@ async function generate(input: InsightInput): Promise<Insight | null> {
           httpOptions: { timeout: 20_000 },
         },
       });
-      const parsed = normalize(JSON.parse(res.text ?? ""), headlines.length);
+      const parsed = normalize(JSON.parse(res.text ?? ""), articleCount);
       if (parsed) return { ...parsed, model, generatedAt: new Date().toISOString() };
     } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return "not_found";
       console.error(`[insight] Gemini failed for ${input.area}: ${e instanceof Error ? e.message.slice(0, 300) : e}`);
     }
   }
