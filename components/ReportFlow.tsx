@@ -20,6 +20,7 @@ type VerifyResult = {
   confidence: number | null;
   band: Band | null;
   status: string;
+  checkerError?: string | null;
 };
 
 type Phase = "compose" | "checking" | "retry" | "published" | "rejected";
@@ -239,11 +240,7 @@ export default function ReportFlow(props: Props) {
         </>
       )}
 
-      {phase === "retry" && message && (
-        <p className="notice notice-warn" role="status">
-          {message}
-        </p>
-      )}
+      {phase === "retry" && message && result && <AttemptNotice lang={lang} result={result} />}
       {error && (
         <p className="notice notice-warn" role="alert">
           {error}
@@ -273,6 +270,7 @@ export default function ReportFlow(props: Props) {
             </div>
           )}
           <p className={`notice ${phase === "published" && result.band !== "unverified" ? "notice-ok" : "notice-warn"}`}>{message}</p>
+          {result.checkerError && <p className="muted small">{t.errorCode(result.checkerError)}</p>}
           {result.confidence !== null && <p className="muted small">{t.confidenceLine(result.confidence)}</p>}
           <div className="actions">
             <button type="button" className="btn-primary" onClick={props.onFinished}>
@@ -281,6 +279,18 @@ export default function ReportFlow(props: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AttemptNotice({ lang, result }: { lang: Lang; result: VerifyResult }) {
+  const t = COPY[lang];
+  const checkerFailed = result.reason === "gemini_failed";
+  return (
+    <div className={`notice ${checkerFailed ? "notice-neutral" : "notice-warn"}`} role="status">
+      <p className="notice-title">{checkerFailed ? t.checkerTitle : t.refusedTitle}</p>
+      <p>{result.message}</p>
+      {checkerFailed && result.checkerError && <p className="notice-code">{t.errorCode(result.checkerError)}</p>}
     </div>
   );
 }

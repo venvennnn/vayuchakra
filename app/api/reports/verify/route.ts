@@ -10,7 +10,7 @@ import {
 } from "@/lib/confidence";
 import { COPY, hardFailMessage, type Lang } from "@/lib/copy";
 import { getHotspots, hotspotsNear } from "@/lib/firms";
-import { checkPhoto } from "@/lib/gemini";
+import { checkPhoto, type CheckerError } from "@/lib/gemini";
 import { haversineKm, isValidLatLng } from "@/lib/geo";
 import { publishReport, UUID_RE } from "@/lib/reports";
 import { EVIDENCE_BUCKET, supabaseAdmin } from "@/lib/supabase/server";
@@ -33,6 +33,7 @@ function reply(body: {
   confidence: number | null;
   band: Band | null;
   status: "draft" | "published" | "rejected";
+  checkerError?: CheckerError | null;
 }) {
   return NextResponse.json(body);
 }
@@ -155,6 +156,10 @@ export async function POST(req: NextRequest) {
     })),
   });
 
+  if (!gemini.ok) {
+    console.error(`[verify] Gemini failed for report ${report.id} attempt ${attemptNo}: ${gemini.error} (${gemini.model}) ${gemini.detail}`);
+  }
+  const checkerError = gemini.ok ? null : gemini.error;
   const verdict = gemini.ok ? gemini.verdict : null;
   const reason = hardFailReason(verdict, exifKm);
   const scored =
@@ -177,7 +182,7 @@ export async function POST(req: NextRequest) {
     exif_taken_at: exif.takenAt,
     gemini: gemini.ok
       ? { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, score_steps: scored?.steps ?? null }
-      : { model: gemini.model, error: gemini.error, exif_km: exifKm },
+      : { model: gemini.model, error: gemini.error, detail: gemini.detail, exif_km: exifKm },
     hard_fail_reason: reason,
     confidence: scored?.score ?? null,
   });
@@ -214,6 +219,7 @@ export async function POST(req: NextRequest) {
       confidence: null,
       band: null,
       status: "rejected",
+      checkerError,
     });
   }
 
@@ -227,5 +233,6 @@ export async function POST(req: NextRequest) {
     confidence: null,
     band: null,
     status: "draft",
+    checkerError,
   });
 }

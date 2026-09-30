@@ -1,5 +1,5 @@
 import "server-only";
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { normalizeVerdict, type Claim, type GeminiVerdict } from "./confidence";
 
 const SYSTEM_INSTRUCTION = `You check a citizen air-quality photo for Project Vayuchakra in India.
@@ -47,14 +47,45 @@ export type GeminiInput = {
   fires: { distance_km: number; frp: number | null; confidence: string; acquired_at: string }[];
 };
 
+/** Why the checker could not run. Shown to the filer as a code and stored on the attempt. */
+export type CheckerError =
+  | "not_configured"
+  | "bad_key"
+  | "quota"
+  | "model_not_found"
+  | "bad_request"
+  | "timeout"
+  | "unavailable"
+  | "bad_response"
+  | "unknown";
+
 export type GeminiResult =
   | { ok: true; verdict: GeminiVerdict; raw: unknown; model: string }
-  | { ok: false; error: string; model: string };
+  | { ok: false; error: CheckerError; detail: string; model: string };
+
+const CALL_TIMEOUT_MS = 25_000;
+// Worth a second call; the rest will fail the same way again.
+const RETRYABLE: CheckerError[] = ["timeout", "unavailable", "bad_response", "unknown"];
+
+export function classifyGeminiError(e: unknown): CheckerError {
+  const msg = e instanceof Error ? e.message : String(e);
+  const name = e instanceof Error ? e.name : "";
+  const status = e instanceof ApiError ? e.status : undefined;
+  if (/API_KEY_INVALID|API key not valid|API_KEY_SERVICE_BLOCKED|PERMISSION_DENIED/i.test(msg)) return "bad_key";
+  if (status === 401 || status === 403) return "bad_key";
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(msg)) return "quota";
+  if (status === 404) return "model_not_found";
+  if (status !== undefined && status >= 500) return "unavailable";
+  if (status === 400) return "bad_request";
+  if (name === "AbortError" || name === "TimeoutError" || /timed? ?out|aborted/i.test(msg)) return "timeout";
+  if (/fetch failed|ECONNRESET|ENOTFOUND|network/i.test(msg)) return "unavailable";
+  return "unknown";
+}
 
 export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
   const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { ok: false, error: "gemini_not_configured", model };
+  if (!apiKey) return { ok: false, error: "not_configured", detail: "GEMINI_API_KEY is not set", model };
   const ai = new GoogleGenAI({ apiKey });
 
   const context = {
@@ -72,7 +103,8 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
     `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
     `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.`;
 
-  let lastError = "unknown";
+  let error: CheckerError = "unknown";
+  let detail = "";
   // One call plus one retry, whether the call errors or returns unparseable JSON.
   for (let i = 0; i < 2; i++) {
     try {
@@ -84,25 +116,34 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
             parts: [{ inlineData: { mimeType: input.mimeType, data: input.image.toString("base64") } }, { text: prompt }],
           },
         ],
-        config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.2, responseMimeType: "application/json" },
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.2,
+          responseMimeType: "application/json",
+          httpOptions: { timeout: CALL_TIMEOUT_MS },
+        },
       });
       const text = res.text ?? "";
       let parsed: unknown;
       try {
         parsed = JSON.parse(text);
       } catch {
-        lastError = "invalid_json";
+        error = "bad_response";
+        detail = `invalid JSON: ${text.slice(0, 200)}`;
         continue;
       }
       const verdict = normalizeVerdict(parsed);
       if (!verdict) {
-        lastError = "invalid_shape";
+        error = "bad_response";
+        detail = `unexpected shape: ${text.slice(0, 200)}`;
         continue;
       }
       return { ok: true, verdict, raw: parsed, model };
     } catch (e) {
-      lastError = e instanceof Error ? e.message.slice(0, 300) : "call_failed";
+      error = classifyGeminiError(e);
+      detail = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+      if (!RETRYABLE.includes(error)) break;
     }
   }
-  return { ok: false, error: lastError, model };
+  return { ok: false, error, detail, model };
 }
