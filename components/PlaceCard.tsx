@@ -55,6 +55,21 @@ export type NewsData = {
     summary: string;
     causes: { key: CauseKey; label: string; evidence: string; articles: number[] }[];
     confidence: "low" | "medium" | "high";
+    model?: string;
+    generatedAt?: string;
+  } | null;
+  evidence?: {
+    basis: string | null;
+    aqi: number;
+    pm25: number;
+    source: string;
+    windKmh: number | null;
+    windFrom: Compass | null;
+    temperatureC: number | null;
+    firesWithin50km: number;
+    firesUpwind: number;
+    trend: { at: string; pm25: number; aqi: number }[];
+    headlines: number;
   } | null;
 };
 
@@ -70,6 +85,7 @@ type Props = {
   news: Loadable<NewsData>;
   onReport: () => void;
   onHow: () => void;
+  onOpenTab: (tab: "news" | "insight" | "city" | "reports") => void;
 };
 
 const ISTDAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
@@ -85,7 +101,7 @@ const POLLUTANT_LABEL: Record<PollutantCode, string> = {
   so2: "SO₂",
 };
 
-const CAUSE_COLOR: Record<CauseKey, string> = {
+export const CAUSE_COLOR: Record<CauseKey, string> = {
   crop_burning: "#d9731f",
   other_fires: "#d4452b",
   traffic: "#50638a",
@@ -102,7 +118,7 @@ function when(iso: string) {
   return ISTDAY.format(d) === ISTDAY.format(new Date()) ? time : `${DAYMONTH.format(d)}, ${time}`;
 }
 
-function ago(lang: Lang, iso: string | null) {
+export function ago(lang: Lang, iso: string | null) {
   if (!iso) return "";
   const t = COPY[lang];
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -149,7 +165,12 @@ export default function PlaceCard(props: Props) {
         <div className="facts">
           {nearby.data.station && (
             <div className="fact">
-              <p className="fact-title">{t.nearestStation}</p>
+              <div className="section-head">
+                <p className="fact-title">{t.nearestStation}</p>
+                <button type="button" className="see-all" onClick={() => props.onOpenTab("city")}>
+                  {t.tabs.city} →
+                </button>
+              </div>
               <p className="fact-main">
                 {nearby.data.station.aqi !== null && (
                   <span
@@ -184,19 +205,24 @@ export default function PlaceCard(props: Props) {
         </div>
       )}
 
-      <Insight lang={lang} news={news} />
+      <Insight lang={lang} news={news} onMore={() => props.onOpenTab("insight")} />
 
       <p className="context">
         {nearby.state === "ok" ? nearby.data.sentence : nearby.state === "loading" ? "\u00a0" : t.ctxNothing}
       </p>
 
       <section className="nearby">
-        <h3 className="section-title">{t.nearbyReports}</h3>
+        <div className="section-head">
+          <h3 className="section-title">{t.nearbyReports}</h3>
+          <button type="button" className="see-all" onClick={() => props.onOpenTab("reports")}>
+            {t.tabs.reports} →
+          </button>
+        </div>
         {nearby.state === "loading" && <p className="muted">{t.loading}</p>}
         {nearby.state !== "loading" && <NearbyList lang={lang} data={nearby.state === "ok" ? nearby.data : null} />}
       </section>
 
-      <NewsList lang={lang} news={news} />
+      <NewsList lang={lang} news={news} onMore={() => props.onOpenTab("news")} />
 
       <div className="actions">
         <button type="button" className="btn-primary" onClick={props.onReport}>
@@ -315,7 +341,7 @@ function Forecast({ lang, hourly }: { lang: Lang; hourly: AirData["hourly"] }) {
   );
 }
 
-function Insight({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
+function Insight({ lang, news, onMore }: { lang: Lang; news: Loadable<NewsData>; onMore: () => void }) {
   const t = COPY[lang];
   const insight = news.state === "ok" ? news.data.insight : null;
   const articles = news.state === "ok" ? news.data.articles : [];
@@ -324,6 +350,11 @@ function Insight({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
       <div className="insight-head">
         <h3 className="section-title">{t.insightTitle}</h3>
         <span className="badge-ai">{t.insightBadge}</span>
+        {insight && (
+          <button type="button" className="see-all" onClick={onMore}>
+            {t.seeAll} →
+          </button>
+        )}
       </div>
       {news.state === "loading" && <p className="muted shimmer">{t.insightLoading}</p>}
       {news.state !== "loading" && !insight && <p className="muted">{t.insightUnavailable}</p>}
@@ -358,7 +389,7 @@ function Insight({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
   );
 }
 
-function NewsList({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
+function NewsList({ lang, news, onMore }: { lang: Lang; news: Loadable<NewsData>; onMore: () => void }) {
   const t = COPY[lang];
   if (news.state === "loading") return null;
   if (news.state === "error") return null;
@@ -366,14 +397,21 @@ function NewsList({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
   const shown = news.data.newsArea ?? area;
   return (
     <section className="block news">
-      <h3 className="section-title">{t.newsTitle(shown)}</h3>
+      <div className="section-head">
+        <h3 className="section-title">{t.newsTitle(shown)}</h3>
+        {articles.length > 3 && (
+          <button type="button" className="see-all" onClick={onMore}>
+            {t.seeAll} →
+          </button>
+        )}
+      </div>
       {shown !== area && articles.length > 0 && <p className="muted small">{t.newsNearest(area)}</p>}
       {!newsAvailable && <p className="muted">{t.newsMissing}</p>}
       {newsAvailable && newsError && <p className="muted">{t.newsFailed[newsError] ?? t.newsFailed.failed}</p>}
       {newsAvailable && !newsError && !articles.length && <p className="muted">{t.newsEmpty}</p>}
       {articles.length > 0 && (
         <ol className="news-list">
-          {articles.slice(0, 6).map((a, i) => (
+          {articles.slice(0, 3).map((a, i) => (
             <li key={a.link}>
               <a href={a.link} target="_blank" rel="noreferrer" className="news-item">
                 <span className="news-num">{i + 1}</span>

@@ -4,27 +4,34 @@ import { normalizeVerdict, type Claim, type GeminiVerdict } from "./confidence";
 import { configuredModels, markModelNotFound, markModelQuota, markModelWorking, modelCandidates } from "./geminiModel";
 
 const SYSTEM_INSTRUCTION = `You check a citizen air-quality photo for Project Vayuchakra in India.
-You do not decide the AQI. You only judge the photograph.
+You do not decide the AQI and you do not invent a confidence score for publication. You only judge the photograph and how it sits with the sensors you are given.
 The pin is the location the person selected. EXIF may be missing; absence is not fraud.
 Signs, scripts, vehicles, and vegetation can suggest a region. A conflict means the photo clearly depicts a different city or country, not merely a generic road.
 Stock photos, screenshots, memes, and indoor photos are conflicts.
-If the frame is blurry, dark, or too close to tell, set image_quality accordingly, set ask_for_another true, and do not invent smoke.
+Nearby AQI, wind and satellite fires are corroboration only: never report a fire or a pollutant that the photo does not itself show.
+If the frame is blurry, dark, or too close to tell, set image_quality to that enum, set request_another_image true, and write a precise retry instruction.
 Reply only with the JSON object.`;
 
 const SCHEMA_HINT = `{
-  "visible": "smoke | dust | haze | open_burning | construction | traffic | none | unclear",
+  "visible_event": "smoke | dust | haze | open_burning | open_waste_burning | construction | traffic | none | unclear",
+  "fire_visible": false,
+  "smoke_visible": false,
+  "image_quality": "good | blurry | dark | too_close | obstructed",
+  "image_quality_score": 0.0,
+  "location_consistency": 0.0,
+  "event_consistency": 0.0,
+  "contradictions": [],
+  "request_another_image": false,
+  "reason": "Visible smoke plume agrees with a nearby satellite fire and the wind.",
   "matches_claim": true,
   "claim_fit": 0.0,
   "outdoor_scene": true,
   "looks_like_screenshot_or_stock": false,
-  "image_quality": "good | blurry | dark | too_close | obstructed",
-  "place_cues": ["Devanagari shop sign", "yellow-black auto"],
+  "place_cues": ["Devanagari shop sign"],
   "place_cues_conflict_with_pin": false,
   "conflict_reason": "",
-  "fire_or_smoke_visible": false,
-  "ask_for_another": false,
-  "retry_reason": "",
-  "confidence": 0.0
+  "description": "Dark grey smoke rising from a roof behind a row of houses; flames visible at the top floor.",
+  "observations": ["Image is sharp and well lit", "Smoke is dense and dark, typical of an active fire"]
 }`;
 
 const CLAIM_TEXT: Record<Claim, string> = {
@@ -48,6 +55,8 @@ export type GeminiInput = {
   fires: { distance_km: number; frp: number | null; confidence: string; acquired_at: string }[];
   /** Recent local pollution headlines. Background only; they never change the score rules. */
   news: string[];
+  air: { pm25: number; aqi: number; source: string; observedAt: string } | null;
+  weather: { windKmh: number; windFrom: string | null; temperatureC: number | null } | null;
 };
 
 /** Why the checker could not run. Shown to the filer as a code and stored on the attempt. */
@@ -90,22 +99,30 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
   if (!apiKey) return { ok: false, error: "not_configured", detail: "GEMINI_API_KEY is not set", model: configuredModels()[0] };
   const ai = new GoogleGenAI({ apiKey });
 
+  const lang = input.replyLanguage === "hi" ? "Hindi" : "English";
   const context = {
     claimed_type: CLAIM_TEXT[input.claim],
     note: input.note || null,
     pin: { latitude: input.pin.lat, longitude: input.pin.lng, place_name: input.pin.placeName },
+    capture_timestamp: input.exifTakenAt,
     exif_gps: input.exif ? { latitude: input.exif.lat, longitude: input.exif.lng } : null,
-    exif_time: input.exifTakenAt,
+    nearby_aqi: input.air,
+    wind: input.weather,
     nearby_fires: input.fires,
     recent_local_news_headlines: input.news,
   };
   const prompt =
     `Judge this photo. The note may be in Hindi or English.\n` +
+    `The published evidence score is calculated by our application from your fields plus EXIF, AQI and FIRMS. Do not invent that score.\n` +
     `News headlines are background only: judge what the photo itself shows, never what the news says.\n` +
     `Context:\n${JSON.stringify(context, null, 2)}\n\n` +
-    `Return one JSON object with exactly these keys:\n${SCHEMA_HINT}\n` +
-    `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
-    `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.`;
+    `Return one JSON object with these keys:\n${SCHEMA_HINT}\n` +
+    `image_quality_score, location_consistency, event_consistency and claim_fit are numbers from 0 to 1.\n` +
+    `contradictions: short phrases for anything that does not line up (wrong place, indoor, stock, no smoke when smoke was claimed).\n` +
+    `If request_another_image is true, reason must be one precise instruction in ${lang}, for example: "Move closer without entering the hazardous area.", "Capture the smoke source and a surrounding landmark.", "The image is too dark; take another photograph."\n` +
+    `description: one or two plain sentences on what the photo shows, as a neutral observer. No people's identities, faces, number plates or house numbers.\n` +
+    `observations: 2 to 4 short phrases on what you checked and saw.\n` +
+    `Write description, observations, reason and contradictions in ${lang}.`;
 
   let error: CheckerError = "quota";
   let detail = "every model is cooling down after a quota error";

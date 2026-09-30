@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AboutDialog from "@/components/AboutDialog";
 import Intro from "@/components/Intro";
 import MapView, { type Basemap, type FlyTarget, type LayerKey, type Layers, type LayerStatus } from "@/components/MapView";
+import { CityTab, InsightTab, NewsTab, ReportsTab, type CityData, type FeedData } from "@/components/PanelTabs";
 import PlaceCard, { type AirData, type Loadable, type NearbyData, type NewsData } from "@/components/PlaceCard";
 import ReportFlow from "@/components/ReportFlow";
-import { COPY, type Lang } from "@/lib/copy";
+import { COPY, type Lang, type PanelTab } from "@/lib/copy";
 import { DEFAULT_ZOOM, INDIA_GATE, type LatLng } from "@/lib/geo";
 import { ensureAnonymousSession } from "@/lib/supabase/client";
 
@@ -46,6 +47,12 @@ export default function Page() {
   const [placeName, setPlaceName] = useState<string | null | undefined>(undefined);
   const [air, setAir] = useState<Loadable<AirData>>({ state: "loading" });
   const [nearby, setNearby] = useState<Loadable<NearbyData>>({ state: "loading" });
+  const [tab, setTab] = useState<PanelTab>("overview");
+  const [wide, setWide] = useState(false);
+  const [city, setCity] = useState<Loadable<CityData>>({ state: "loading" });
+  const [feed, setFeed] = useState<Loadable<FeedData>>({ state: "loading" });
+  const [focusReport, setFocusReport] = useState<string | null>(null);
+  const cardRef = useRef<HTMLElement>(null);
   const userPicked = useRef(false);
   const seq = useRef(0);
   const t = COPY[lang];
@@ -165,13 +172,55 @@ export default function Page() {
     };
   }, [point, lang]);
 
+  // City stats and the report feed load only when their tab is open, once per point.
+  const cityFor = useRef<string | null>(null);
+  const feedFor = useRef<string | null>(null);
+  const pointKey = point ? `${point.lat.toFixed(4)},${point.lng.toFixed(4)}` : null;
+  useEffect(() => {
+    if (!point || !pointKey || tab !== "city" || cityFor.current === pointKey) return;
+    cityFor.current = pointKey;
+    setCity({ state: "loading" });
+    fetch(`/api/city?lat=${point.lat.toFixed(5)}&lng=${point.lng.toFixed(5)}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        setCity({ state: "ok", data: await r.json() });
+      })
+      .catch(() => {
+        cityFor.current = null;
+        setCity({ state: "error" });
+      });
+  }, [point, pointKey, tab]);
+
+  useEffect(() => {
+    const key = pointKey && `${pointKey}:${refreshKey}`;
+    if (!point || !key || tab !== "reports" || feedFor.current === key) return;
+    feedFor.current = key;
+    setFeed({ state: "loading" });
+    fetch(`/api/reports/feed?lat=${point.lat.toFixed(5)}&lng=${point.lng.toFixed(5)}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        setFeed({ state: "ok", data: await r.json() });
+      })
+      .catch(() => {
+        feedFor.current = null;
+        setFeed({ state: "error" });
+      });
+  }, [point, pointKey, tab, refreshKey]);
+
+  const openTab = useCallback((next: PanelTab) => {
+    setTab(next);
+    cardRef.current?.scrollTo({ top: 0 });
+  }, []);
+
   const onPick = useCallback(
-    (p: LatLng) => {
+    (p: LatLng, meta?: { reportId?: string }) => {
       if (mode === "report" && pinLocked) return;
       userPicked.current = true;
       setPoint(p);
+      setFocusReport(meta?.reportId ?? null);
+      if (meta?.reportId) openTab("reports");
     },
-    [mode, pinLocked],
+    [mode, pinLocked, openTab],
   );
 
   const closeReport = useCallback(() => {
@@ -194,7 +243,7 @@ export default function Page() {
     !!userLoc && !!point && Math.abs(userLoc.lat - point.lat) < 1e-9 && Math.abs(userLoc.lng - point.lng) < 1e-9;
 
   return (
-    <main className={`app basemap-${basemap}`}>
+    <main className={`app basemap-${basemap}${wide && mode === "place" ? " is-wide" : ""}`}>
       <MapView
         lang={lang}
         visible={docked}
@@ -238,21 +287,43 @@ export default function Page() {
       )}
 
       {docked && point && (
-        <aside className="card" aria-label={mode === "report" ? t.reportTitle : t.nearYou}>
-          <div key={mode} className="card-swap">
-            {mode === "place" ? (
-              <PlaceCard
-                lang={lang}
-                point={point}
-                isUser={isUser}
-                placeName={placeName}
-                air={air}
-                nearby={nearby}
-                news={news}
-                onReport={() => setMode("report")}
-                onHow={() => setAbout({ open: true, section: "how" })}
-              />
-            ) : (
+        <aside ref={cardRef} className="card" aria-label={mode === "report" ? t.reportTitle : t.nearYou}>
+          {mode === "place" && (
+            <div className="tab-bar">
+              <div className="tabs" role="tablist">
+                {(["overview", "city", "news", "insight", "reports"] as PanelTab[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === k}
+                    className={tab === k ? "is-on" : ""}
+                    onClick={() => openTab(k)}
+                  >
+                    {t.tabs[k]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="tab-expand"
+                aria-pressed={wide}
+                aria-label={wide ? t.collapse : t.expand}
+                title={wide ? t.collapse : t.expand}
+                onClick={() => setWide((w) => !w)}
+              >
+                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                  {wide ? (
+                    <path d="M8 4v4H4M12 16v-4h4M8 8 3 3M12 12l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  ) : (
+                    <path d="M3 8V3h5M17 12v5h-5M3 3l5 5M17 17l-5-5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  )}
+                </svg>
+              </button>
+            </div>
+          )}
+          <div key={mode === "place" ? tab : mode} className="card-swap">
+            {mode === "report" ? (
               <ReportFlow
                 lang={lang}
                 point={point}
@@ -265,6 +336,27 @@ export default function Page() {
                 }}
                 onLockChange={setPinLocked}
                 onBusyChange={setChecking}
+              />
+            ) : tab === "city" ? (
+              <CityTab lang={lang} city={city} placeName={placeName} onPick={(p) => onPick(p)} />
+            ) : tab === "news" ? (
+              <NewsTab lang={lang} news={news} />
+            ) : tab === "insight" ? (
+              <InsightTab lang={lang} news={news} />
+            ) : tab === "reports" ? (
+              <ReportsTab lang={lang} feed={feed} focusId={focusReport} />
+            ) : (
+              <PlaceCard
+                lang={lang}
+                point={point}
+                isUser={isUser}
+                placeName={placeName}
+                air={air}
+                nearby={nearby}
+                news={news}
+                onReport={() => setMode("report")}
+                onHow={() => setAbout({ open: true, section: "how" })}
+                onOpenTab={openTab}
               />
             )}
           </div>

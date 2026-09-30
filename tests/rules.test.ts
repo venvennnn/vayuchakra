@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pm25SubIndex, categoryFromIndex } from "../lib/aqi.ts";
-import { bandFor, computeConfidence, hardFailReason, normalizeVerdict, type GeminiVerdict } from "../lib/confidence.ts";
+import { bandFor, combineAttempts, computeConfidence, hardFailReason, liveModelLabel, normalizeVerdict, SCORE_RETRY_BELOW, type GeminiVerdict } from "../lib/confidence.ts";
 
 const base: GeminiVerdict = {
   visible: "haze",
@@ -10,6 +10,12 @@ const base: GeminiVerdict = {
   outdoor_scene: true,
   looks_like_screenshot_or_stock: false,
   image_quality: "good",
+  image_quality_score: 0.9,
+  location_consistency: 0,
+  event_consistency: 0,
+  contradictions: [],
+  fire_visible: false,
+  smoke_visible: false,
   place_cues: [],
   place_cues_conflict_with_pin: false,
   conflict_reason: "",
@@ -35,26 +41,39 @@ test("CPCB sub-index breakpoints", () => {
   assert.equal(categoryFromIndex(401), "severe");
 });
 
-test("worked example 1: traffic haze at Connaught Place → 95 corroborated", () => {
-  const { score } = computeConfidence({ verdict: base, claim: "traffic", exifDistanceKm: 0.18, nearestFireKm: null, previousHardFails: 0 });
-  assert.equal(score, 95);
-  assert.equal(bandFor(score), "corroborated");
+test("evidence score is 30/25/20/15/10 and is never Gemini's own confidence", () => {
+  // quality 0.9×30=27, event 0.8×25=20, location EXIF 0.18km →1.0×20=20, sensor 0.35×15=5.25, report 0.92×10=9.2 → 81
+  const a = computeConfidence({ verdict: base, claim: "traffic", exifDistanceKm: 0.18, nearestFireKm: null, previousHardFails: 0 });
+  assert.equal(a.score, 81);
+  assert.equal(bandFor(a.score), "corroborated");
+  assert.ok(a.score !== Math.round(base.confidence * 100));
+
+  const smoke = { ...base, visible: "smoke" as const, claim_fit: 0.5, fire_or_smoke_visible: false };
+  // 27 + 12.5 + 10 + 1.5 + 8 = 59
+  const b = computeConfidence({ verdict: smoke, claim: "smoke", exifDistanceKm: null, nearestFireKm: null, previousHardFails: 0 });
+  assert.equal(b.score, 59);
+  assert.equal(b.score < SCORE_RETRY_BELOW, true);
+  assert.equal(bandFor(b.score), "plausible");
 });
 
-test("worked example 2: smoke claim, no EXIF, no FIRMS → 50 plausible", () => {
-  const verdict = { ...base, visible: "smoke" as const, claim_fit: 0.5, confidence: 0.6 };
-  const { score } = computeConfidence({ verdict, claim: "smoke", exifDistanceKm: null, nearestFireKm: null, previousHardFails: 0 });
-  assert.equal(score, 50);
-  assert.equal(bandFor(score), "plausible");
+test("FIRMS lifts the sensor slice; contradictions and previous fails cut the report slice", () => {
+  const v = { ...base, claim_fit: 0.6, confidence: 0.5, fire_or_smoke_visible: false };
+  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: null, nearestFireKm: 3, previousHardFails: 0 }).score, 75);
+  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: null, nearestFireKm: 12, previousHardFails: 0 }).score, 71);
+  assert.equal(computeConfidence({ verdict: v, claim: "dust", exifDistanceKm: null, nearestFireKm: 3, previousHardFails: 0 }).score, 66);
+  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: 1.5, nearestFireKm: null, previousHardFails: 2 }).score, 65);
+  assert.equal(computeConfidence({ verdict: { ...v, matches_claim: false, claim_fit: 0.2 }, claim: "dust", exifDistanceKm: null, nearestFireKm: null, previousHardFails: 0 }).score, 47);
 });
 
-test("FIRMS bonuses and penalties", () => {
-  const v = { ...base, claim_fit: 0.6, confidence: 0.5 };
-  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: null, nearestFireKm: 3, previousHardFails: 0 }).score, 62);
-  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: null, nearestFireKm: 12, previousHardFails: 0 }).score, 56);
-  assert.equal(computeConfidence({ verdict: v, claim: "dust", exifDistanceKm: null, nearestFireKm: 3, previousHardFails: 0 }).score, 50);
-  assert.equal(computeConfidence({ verdict: v, claim: "smoke", exifDistanceKm: 1.5, nearestFireKm: null, previousHardFails: 2 }).score, 38);
-  assert.equal(computeConfidence({ verdict: { ...v, matches_claim: false, claim_fit: 0.2 }, claim: "dust", exifDistanceKm: null, nearestFireKm: null, previousHardFails: 0 }).score, 15);
+test("multi-image combine is best + agreement bonus − contradiction penalty", () => {
+  const r = combineAttempts([
+    { score: 62, visible: "open_burning", contradictions: ["no landmark"] },
+    { score: 71, visible: "open_burning", contradictions: ["no landmark"] },
+  ]);
+  assert.equal(r.best, 71);
+  assert.equal(r.bonus, 6);
+  assert.equal(r.penalty, 5);
+  assert.equal(r.score, 72);
 });
 
 test("hard fails", () => {
@@ -68,12 +87,31 @@ test("hard fails", () => {
   assert.equal(hardFailReason(base, null), null);
 });
 
-test("normalizeVerdict is cautious with missing fields", () => {
+test("normalizeVerdict is cautious with missing fields and accepts the demo JSON shape", () => {
   assert.equal(normalizeVerdict("nope"), null);
   const v = normalizeVerdict({ confidence: 4 })!;
   assert.equal(v.confidence, 1);
   assert.equal(v.outdoor_scene, false);
   assert.equal(v.image_quality, "obstructed");
+  const demo = normalizeVerdict({
+    visible_event: "open_waste_burning",
+    fire_visible: true,
+    smoke_visible: true,
+    image_quality: 0.91,
+    location_consistency: 0.78,
+    event_consistency: 0.86,
+    contradictions: [],
+    request_another_image: false,
+    reason: "Visible smoke plume agrees with nearby fire and wind signals.",
+    outdoor_scene: true,
+    matches_claim: true,
+  })!;
+  assert.equal(demo.visible, "open_burning");
+  assert.equal(demo.image_quality, "good");
+  assert.equal(demo.image_quality_score, 0.91);
+  assert.equal(demo.fire_or_smoke_visible, true);
+  assert.equal(demo.retry_reason.startsWith("Visible smoke"), true);
+  assert.equal(liveModelLabel("gemini-2.5-flash"), "Gemini 2.5 Flash");
 });
 
 test("Gemini model names: env mistakes are cleaned and discovered Flash models are ranked", async () => {

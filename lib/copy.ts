@@ -1,6 +1,9 @@
 import type { CategoryKey } from "./aqi";
 import type { Claim, HardFailReason } from "./confidence";
 import type { Compass } from "./geo";
+import type { CheckKey, CheckStatus } from "./reportChecks";
+
+export type PanelTab = "overview" | "city" | "news" | "insight" | "reports";
 
 export type Lang = "en" | "hi";
 
@@ -69,6 +72,26 @@ const en = {
   publishedCorroborated: "Published. It shows on the map as Checked.",
   publishedPlausible: "Published. It shows on the map as Plausible.",
   publishedUnverified: "Saved, not shown — confidence too low.",
+  scoreTooLow: (n: number) =>
+    `Evidence score ${n}/100 — below 60, so we need another photograph. This try still counts. Capture the source and a landmark, closer but without entering any hazard.`,
+  verifiedLive: (model: string) => `Verified live using ${model}`,
+  howAssessed: "How Gemini assessed this",
+  scoreBreakdown: "Evidence score, calculated here — not invented by Gemini",
+  weightQuality: "Image quality · 30%",
+  weightEvent: "Visual-event match · 25%",
+  weightLocation: "Location / time · 20%",
+  weightSensor: "Satellite or sensor · 15%",
+  weightReport: "Report consistency · 10%",
+  contradictionsTitle: "Contradictions",
+  combineLine: (best: number, bonus: number, penalty: number) =>
+    `Best photo ${best}${bonus ? ` · +${bonus} for agreeing photos` : ""}${penalty ? ` · −${penalty} for contradictions` : ""}`,
+  briefTitle: "Incident brief",
+  briefHappened: "What probably happened",
+  briefWhere: "Where",
+  briefEvidence: "Evidence",
+  briefExposed: "Exposed areas",
+  briefAction: "Recommended action",
+  briefUncertainty: "Uncertainty",
   confidenceLine: (n: number) => `Confidence ${n} / 100`,
   rejected: "We could not verify a photo in 3 tries. Nothing was published.",
   rateLimited: "You can file 5 reports a day from this browser.",
@@ -142,6 +165,94 @@ const en = {
   agoMinutes: (n: number) => `${n} min ago`,
   agoHours: (n: number) => `${n} h ago`,
   agoDays: (n: number) => `${n} d ago`,
+  // Panel tabs
+  tabs: { overview: "Overview", city: "City", news: "News", insight: "AI report", reports: "Reports" } as Record<PanelTab, string>,
+  expand: "Widen panel",
+  collapse: "Narrow panel",
+  seeAll: "See all",
+  // Photo checks
+  checksTitle: "What we checked",
+  checkerSaw: "What the checker saw",
+  checkLabel: {
+    quality: "Image quality",
+    outdoor: "Outdoor scene",
+    authentic: "Real photo",
+    claim_match: "Matches what was reported",
+    smoke_visible: "Smoke or fire visible",
+    place: "Fits the pinned place",
+    exif: "Photo location",
+    satellite_fire: "Satellite fire nearby",
+  } as Record<CheckKey, string>,
+  checkValue: (key: CheckKey, status: CheckStatus, value: string | number | null | undefined): string => {
+    switch (key) {
+      case "quality":
+        return ({ good: "Sharp and clear", blurry: "Blurry", dark: "Too dark", too_close: "Too close", obstructed: "View blocked" } as Record<string, string>)[String(value)] ?? "";
+      case "outdoor":
+        return status === "pass" ? "Yes" : "Looks indoors";
+      case "authentic":
+        return status === "pass" ? "Looks like a real camera photo" : "Looks like a screenshot or downloaded image";
+      case "claim_match":
+        return `${value ?? 0}% fit`;
+      case "smoke_visible":
+        return status === "pass" ? "Yes" : "Not clearly visible";
+      case "place":
+        return status === "pass" ? (value ? `Cues: ${value}` : "Nothing conflicting") : String(value || "Looks like a different place");
+      case "exif":
+        return status === "info" ? "No GPS in the photo (that is fine)" : `${value} km from the pin`;
+      case "satellite_fire":
+        return status === "pass" ? `NASA saw a fire ${value} km away` : "No satellite fire within 15 km";
+    }
+  },
+  visibleLabel: {
+    smoke: "Smoke",
+    dust: "Dust",
+    haze: "Haze",
+    open_burning: "Open burning",
+    construction: "Construction",
+    traffic: "Traffic",
+    none: "Nothing notable",
+    unclear: "Unclear",
+  } as Record<string, string>,
+  resultPublished: "Report published",
+  resultRejected: "Report not published",
+  // City tab
+  cityTitle: (city: string) => `${city} · CPCB stations`,
+  cityNoStations: "No CPCB station within 60 km of this point.",
+  cityAvg: "City average",
+  cityWorst: "Highest",
+  cityBest: "Lowest",
+  cityStations: (n: number, reporting: number) => `${reporting} of ${n} stations reporting`,
+  cityCategories: "Stations by category",
+  cityDominant: "Leading pollutant at stations",
+  cityStationList: "All stations",
+  cityIndexNote: "CPCB’s published index: the highest pollutant sub-index at each station.",
+  cityFires: "Satellite fires, last 48 h",
+  firesWithin: (km: number) => `within ${km} km`,
+  firesUpwindLabel: "upwind, 400 km",
+  cityReports: "Checked citizen reports within 15 km",
+  reportsLast7: "last 7 days",
+  reportsAll: "all time",
+  // Insight tab
+  insightEvidence: "What Gemini looked at",
+  evReading: "Reading",
+  evWind: "Wind",
+  evTemp: "Temperature",
+  evFires: "Fires (48 h)",
+  evHeadlines: "Headlines",
+  evBasis: (b: string) => `Measured at ${b}, shared by all of Delhi NCR`,
+  evFiresValue: (near: number, up: number) => `${near} within 50 km · ${up} upwind`,
+  causesTitle: "Likely causes",
+  citedTitle: "Headlines it cited",
+  insightMeta: (model: string, t: string) => `Written by ${model} at ${t} IST`,
+  insightDisclaimer: "An AI summary of the evidence above. It can be wrong, and it never changes the number.",
+  trendTitle: "PM2.5 trend it saw",
+  // Reports tab
+  feedTitle: "Reports within 10 km · last 30 days",
+  feedNone: "No published reports here in the last 30 days.",
+  feedPrivacy: "Photos and notes stay private. You see what was reported, when, and what our checker saw.",
+  reportedAs: (claim: string) => `Reported: ${claim}`,
+  confidenceShort: (n: number) => `${n}/100`,
+  kmAway: (km: string) => `${km} km away`,
   // Context sentence
   compass: { n: "north", ne: "northeast", e: "east", se: "southeast", s: "south", sw: "southwest", w: "west", nw: "northwest" } as Record<Compass, string>,
   ctxReportsFire: (n: number, km: string, dir: string, h: number, compass: string, speed: number) =>
@@ -248,6 +359,26 @@ const hi: Copy = {
   publishedCorroborated: "प्रकाशित। नक्शे पर ‘जाँची गई’ के रूप में दिखेगी।",
   publishedPlausible: "प्रकाशित। नक्शे पर ‘संभावित’ के रूप में दिखेगी।",
   publishedUnverified: "सहेजी गई, दिखाई नहीं गई — भरोसा बहुत कम है।",
+  scoreTooLow: (n) =>
+    `सबूत स्कोर ${n}/100 — 60 से कम, इसलिए एक और फ़ोटो चाहिए। यह कोशिश गिनी गई। स्रोत और कोई पहचान वाला निशान लें, पास से लेकिन खतरे में घुसे बिना।`,
+  verifiedLive: (model) => `${model} से लाइव जाँची गई`,
+  howAssessed: "Gemini ने यह कैसे जाँचा",
+  scoreBreakdown: "सबूत स्कोर, यहाँ गिना गया — Gemini ने नहीं बनाया",
+  weightQuality: "फ़ोटो की गुणवत्ता · 30%",
+  weightEvent: "दृश्य घटना से मेल · 25%",
+  weightLocation: "जगह / समय · 20%",
+  weightSensor: "सैटेलाइट या सेंसर · 15%",
+  weightReport: "रिपोर्ट की संगति · 10%",
+  contradictionsTitle: "विरोध",
+  combineLine: (best, bonus, penalty) =>
+    `सबसे अच्छी फ़ोटो ${best}${bonus ? ` · सहमत फ़ोटो के लिए +${bonus}` : ""}${penalty ? ` · विरोध के लिए −${penalty}` : ""}`,
+  briefTitle: "घटना संक्षेप",
+  briefHappened: "शायद क्या हुआ",
+  briefWhere: "कहाँ",
+  briefEvidence: "सबूत",
+  briefExposed: "प्रभावित इलाके",
+  briefAction: "सुझाया गया कदम",
+  briefUncertainty: "अनिश्चितता",
   confidenceLine: (n) => `भरोसा ${n} / 100`,
   rejected: "3 प्रयासों में फ़ोटो की पुष्टि नहीं हो सकी। कुछ भी प्रकाशित नहीं हुआ।",
   rateLimited: "इस ब्राउज़र से आप एक दिन में 5 रिपोर्ट भेज सकते हैं।",
@@ -316,6 +447,89 @@ const hi: Copy = {
   agoMinutes: (n) => `${n} मिनट पहले`,
   agoHours: (n) => `${n} घंटे पहले`,
   agoDays: (n) => `${n} दिन पहले`,
+  tabs: { overview: "सारांश", city: "शहर", news: "ख़बरें", insight: "AI रिपोर्ट", reports: "रिपोर्ट" },
+  expand: "पैनल चौड़ा करें",
+  collapse: "पैनल छोटा करें",
+  seeAll: "सब देखें",
+  checksTitle: "हमने क्या जाँचा",
+  checkerSaw: "जाँच में क्या दिखा",
+  checkLabel: {
+    quality: "फ़ोटो की गुणवत्ता",
+    outdoor: "बाहर का दृश्य",
+    authentic: "असली फ़ोटो",
+    claim_match: "बताई गई बात से मेल",
+    smoke_visible: "धुआँ या आग दिखी",
+    place: "पिन वाली जगह से मेल",
+    exif: "फ़ोटो की लोकेशन",
+    satellite_fire: "पास में सैटेलाइट आग",
+  },
+  checkValue: (key, status, value) => {
+    switch (key) {
+      case "quality":
+        return ({ good: "साफ़ और स्पष्ट", blurry: "धुंधली", dark: "बहुत अँधेरी", too_close: "बहुत पास से", obstructed: "नज़ारा ढका हुआ" } as Record<string, string>)[String(value)] ?? "";
+      case "outdoor":
+        return status === "pass" ? "हाँ" : "अंदर की लगती है";
+      case "authentic":
+        return status === "pass" ? "कैमरे की असली फ़ोटो लगती है" : "स्क्रीनशॉट या डाउनलोड की हुई लगती है";
+      case "claim_match":
+        return `${value ?? 0}% मेल`;
+      case "smoke_visible":
+        return status === "pass" ? "हाँ" : "साफ़ नहीं दिखा";
+      case "place":
+        return status === "pass" ? (value ? `संकेत: ${value}` : "कुछ विरोधी नहीं") : String(value || "कोई और जगह लगती है");
+      case "exif":
+        return status === "info" ? "फ़ोटो में GPS नहीं (कोई बात नहीं)" : `पिन से ${value} किमी`;
+      case "satellite_fire":
+        return status === "pass" ? `NASA ने ${value} किमी पर आग देखी` : "15 किमी में कोई सैटेलाइट आग नहीं";
+    }
+  },
+  visibleLabel: {
+    smoke: "धुआँ",
+    dust: "धूल",
+    haze: "धुंध",
+    open_burning: "खुले में जलाना",
+    construction: "निर्माण",
+    traffic: "ट्रैफ़िक",
+    none: "कुछ ख़ास नहीं",
+    unclear: "साफ़ नहीं",
+  },
+  resultPublished: "रिपोर्ट प्रकाशित हुई",
+  resultRejected: "रिपोर्ट प्रकाशित नहीं हुई",
+  cityTitle: (city) => `${city} · CPCB स्टेशन`,
+  cityNoStations: "इस जगह से 60 किमी के भीतर कोई CPCB स्टेशन नहीं।",
+  cityAvg: "शहर का औसत",
+  cityWorst: "सबसे ज़्यादा",
+  cityBest: "सबसे कम",
+  cityStations: (n, reporting) => `${n} में से ${reporting} स्टेशन रिपोर्ट कर रहे हैं`,
+  cityCategories: "श्रेणी के अनुसार स्टेशन",
+  cityDominant: "स्टेशनों पर मुख्य प्रदूषक",
+  cityStationList: "सभी स्टेशन",
+  cityIndexNote: "CPCB का प्रकाशित सूचकांक: हर स्टेशन पर सबसे ऊँचा प्रदूषक उप-सूचकांक।",
+  cityFires: "सैटेलाइट आग, पिछले 48 घंटे",
+  firesWithin: (km) => `${km} किमी के भीतर`,
+  firesUpwindLabel: "हवा की दिशा में, 400 किमी",
+  cityReports: "15 किमी के भीतर जाँची गई नागरिक रिपोर्ट",
+  reportsLast7: "पिछले 7 दिन",
+  reportsAll: "कुल",
+  insightEvidence: "Gemini ने क्या देखा",
+  evReading: "माप",
+  evWind: "हवा",
+  evTemp: "तापमान",
+  evFires: "आग (48 घंटे)",
+  evHeadlines: "ख़बरें",
+  evBasis: (b) => `${b} पर मापा गया, पूरे दिल्ली NCR के लिए एक`,
+  evFiresValue: (near, up) => `50 किमी में ${near} · हवा की दिशा में ${up}`,
+  causesTitle: "संभावित कारण",
+  citedTitle: "जिन ख़बरों का हवाला दिया",
+  insightMeta: (model, t) => `${model} ने ${t} IST पर लिखा`,
+  insightDisclaimer: "ऊपर के सबूतों का AI सारांश। यह ग़लत हो सकता है, और यह संख्या को कभी नहीं बदलता।",
+  trendTitle: "PM2.5 का रुझान जो उसने देखा",
+  feedTitle: "10 किमी के भीतर रिपोर्ट · पिछले 30 दिन",
+  feedNone: "पिछले 30 दिनों में यहाँ कोई प्रकाशित रिपोर्ट नहीं।",
+  feedPrivacy: "फ़ोटो और नोट निजी रहते हैं। आप देखते हैं कि क्या बताया गया, कब, और जाँच में क्या दिखा।",
+  reportedAs: (claim) => `बताया गया: ${claim}`,
+  confidenceShort: (n) => `${n}/100`,
+  kmAway: (km) => `${km} किमी दूर`,
   compass: { n: "उत्तर", ne: "उत्तर-पूर्व", e: "पूर्व", se: "दक्षिण-पूर्व", s: "दक्षिण", sw: "दक्षिण-पश्चिम", w: "पश्चिम", nw: "उत्तर-पश्चिम" },
   ctxReportsFire: (n, km, dir, h, compass, speed) =>
     `5 किमी के भीतर ${n} जाँची गई रिपोर्ट। ${h} घंटे पहले यहाँ से ${km} किमी ${dir} में एक सैटेलाइट हॉटस्पॉट था। हवा ${compass} से ${speed} km/h पर है, इसलिए पास का धुआँ यहाँ आ सकता है।`,

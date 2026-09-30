@@ -5,6 +5,7 @@ import { CLAIMS, type Band, type Claim } from "@/lib/confidence";
 import { COPY, type Lang } from "@/lib/copy";
 import { formatCoords, type LatLng } from "@/lib/geo";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { ReviewBlock, AssessmentPanel, type Review, type Assessment } from "@/components/Checks";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 // Vercel caps function request bodies at 4.5 MB; larger photos go straight to Storage.
@@ -21,6 +22,8 @@ type VerifyResult = {
   band: Band | null;
   status: string;
   checkerError?: string | null;
+  review?: Review | null;
+  assessment?: Assessment | null;
 };
 
 type Phase = "compose" | "checking" | "retry" | "published" | "rejected";
@@ -241,6 +244,10 @@ export default function ReportFlow(props: Props) {
       )}
 
       {phase === "retry" && message && result && <AttemptNotice lang={lang} result={result} />}
+      {phase === "retry" && result?.review && <ReviewBlock lang={lang} review={result.review} />}
+      {phase === "retry" && result?.assessment && (
+        <AssessmentPanel lang={lang} assessment={result.assessment} score={result.confidence} />
+      )}
       {error && (
         <p className="notice notice-warn" role="alert">
           {error}
@@ -269,9 +276,21 @@ export default function ReportFlow(props: Props) {
               <img src={preview} alt="" />
             </div>
           )}
-          <p className={`notice ${phase === "published" && result.band !== "unverified" ? "notice-ok" : "notice-warn"}`}>{message}</p>
+          <div className={`notice ${phase === "published" && result.band !== "unverified" ? "notice-ok" : "notice-warn"}`}>
+            <p className="notice-title">{phase === "published" ? t.resultPublished : t.resultRejected}</p>
+            <p>{message}</p>
+          </div>
+          {result.confidence !== null && (
+            <div className="score-row">
+              <div className="score-bar">
+                <span style={{ width: `${result.confidence}%` }} className={`band-fill band-${result.band ?? "unverified"}`} />
+              </div>
+              <span className="score-num">{t.confidenceLine(result.confidence)}</span>
+            </div>
+          )}
+          {result.review && <ReviewBlock lang={lang} review={result.review} />}
+          {result.assessment && <AssessmentPanel lang={lang} assessment={result.assessment} score={result.confidence} />}
           {result.checkerError && <p className="muted small">{t.errorCode(result.checkerError)}</p>}
-          {result.confidence !== null && <p className="muted small">{t.confidenceLine(result.confidence)}</p>}
           <div className="actions">
             <button type="button" className="btn-primary" onClick={props.onFinished}>
               {t.done}

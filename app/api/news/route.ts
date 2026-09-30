@@ -39,10 +39,11 @@ export async function GET(req: NextRequest) {
 
   const articles = news.ok ? news.news.articles : [];
   let insight = null;
+  let evidence = null;
   if (live) {
     const aqi = pm25SubIndex(live.pm25);
     const windFrom = windCompass(weather?.windFromDeg ?? null);
-    insight = await getInsight({
+    const input = {
       area,
       lang,
       aqi,
@@ -56,7 +57,21 @@ export async function GET(req: NextRequest) {
       firesWithin50km: hotspotsNear(hotspots, basis, 50).length,
       firesUpwind: upwindFires(hotspots, basis, weather?.windFromDeg ?? null).length,
       articles,
-    }).catch(() => null);
+    };
+    evidence = {
+      basis: area === "Delhi NCR" ? "India Gate, New Delhi" : null,
+      aqi,
+      pm25: input.pm25,
+      source: live.source,
+      windKmh: input.windKmh,
+      windFrom,
+      temperatureC: input.temperatureC,
+      firesWithin50km: input.firesWithin50km,
+      firesUpwind: input.firesUpwind,
+      trend: input.trend.map((h) => ({ at: h.at, pm25: h.pm25, aqi: pm25SubIndex(h.pm25) })),
+      headlines: Math.min(8, articles.length),
+    };
+    insight = await getInsight(input).catch(() => null);
   }
 
   return NextResponse.json({
@@ -66,5 +81,6 @@ export async function GET(req: NextRequest) {
     newsError: news.ok ? null : news.error,
     articles: articles.slice(0, 8),
     insight,
+    evidence,
   });
 }
