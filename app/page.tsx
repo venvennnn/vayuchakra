@@ -194,7 +194,7 @@ export default function Page() {
     !!userLoc && !!point && Math.abs(userLoc.lat - point.lat) < 1e-9 && Math.abs(userLoc.lng - point.lng) < 1e-9;
 
   return (
-    <main className="app">
+    <main className={`app basemap-${basemap}`}>
       <MapView
         lang={lang}
         visible={docked}
