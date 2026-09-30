@@ -758,6 +758,32 @@ h3 {
   line-height: 1.5;
 }
 
+.kid-explain {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, #fff6d8, transparent 55%),
+    linear-gradient(180deg, #fffdf6, #fff);
+  border: 1px solid #f0e4b8;
+}
+
+.kid-explain .section-title {
+  margin: 0;
+}
+
+.kid-note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.kid-body {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 .causes {
   list-style: none;
   margin: 10px 0 6px;
