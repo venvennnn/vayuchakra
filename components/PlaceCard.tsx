@@ -47,7 +47,9 @@ type CauseKey = "crop_burning" | "other_fires" | "traffic" | "construction_dust"
 
 export type NewsData = {
   area: string;
+  newsArea?: string;
   newsAvailable: boolean;
+  newsError?: "not_configured" | "bad_key" | "out_of_searches" | "failed" | null;
   articles: { title: string; link: string; source: string | null; sourceIcon: string | null; publishedAt: string | null; thumbnail: string | null }[];
   insight: {
     summary: string;
@@ -360,12 +362,15 @@ function NewsList({ lang, news }: { lang: Lang; news: Loadable<NewsData> }) {
   const t = COPY[lang];
   if (news.state === "loading") return null;
   if (news.state === "error") return null;
-  const { area, newsAvailable, articles } = news.data;
+  const { area, newsAvailable, newsError, articles } = news.data;
+  const shown = news.data.newsArea ?? area;
   return (
     <section className="block news">
-      <h3 className="section-title">{t.newsTitle(area)}</h3>
+      <h3 className="section-title">{t.newsTitle(shown)}</h3>
+      {shown !== area && articles.length > 0 && <p className="muted small">{t.newsNearest(area)}</p>}
       {!newsAvailable && <p className="muted">{t.newsMissing}</p>}
-      {newsAvailable && !articles.length && <p className="muted">{t.newsEmpty}</p>}
+      {newsAvailable && newsError && <p className="muted">{t.newsFailed[newsError] ?? t.newsFailed.failed}</p>}
+      {newsAvailable && !newsError && !articles.length && <p className="muted">{t.newsEmpty}</p>}
       {articles.length > 0 && (
         <ol className="news-list">
           {articles.slice(0, 6).map((a, i) => (
