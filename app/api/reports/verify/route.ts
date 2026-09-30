@@ -161,9 +161,22 @@ export async function POST(req: NextRequest) {
 
   if (!gemini.ok) {
     console.error(`[verify] Gemini failed for report ${report.id} attempt ${attemptNo}: ${gemini.error} (${gemini.model}) ${gemini.detail}`);
+    // Our failure, not the filer's: hand the attempt back so it can be retried with the same number.
+    await sb.from("reports").update({ attempts_used: attemptNo - 1 }).eq("id", report.id).eq("attempts_used", attemptNo);
+    const t = COPY[lang];
+    return reply({
+      attempt: attemptNo,
+      attemptsRemaining: 3 - (attemptNo - 1),
+      outcome: "retry",
+      reason: "gemini_failed",
+      message: gemini.error === "quota" ? t.checkerBusy : hardFailMessage(lang, "gemini_failed"),
+      confidence: null,
+      band: null,
+      status: "draft",
+      checkerError: gemini.error,
+    });
   }
-  const checkerError = gemini.ok ? null : gemini.error;
-  const verdict = gemini.ok ? gemini.verdict : null;
+  const verdict = gemini.verdict;
   const reason = hardFailReason(verdict, exifKm);
   const scored =
     verdict && !reason
@@ -183,9 +196,7 @@ export async function POST(req: NextRequest) {
     exif_lat: exif.gps?.lat ?? null,
     exif_lng: exif.gps?.lng ?? null,
     exif_taken_at: exif.takenAt,
-    gemini: gemini.ok
-      ? { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, score_steps: scored?.steps ?? null }
-      : { model: gemini.model, error: gemini.error, detail: gemini.detail, exif_km: exifKm },
+    gemini: { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, score_steps: scored?.steps ?? null },
     hard_fail_reason: reason,
     confidence: scored?.score ?? null,
   });
@@ -222,7 +233,6 @@ export async function POST(req: NextRequest) {
       confidence: null,
       band: null,
       status: "rejected",
-      checkerError,
     });
   }
 
@@ -236,6 +246,5 @@ export async function POST(req: NextRequest) {
     confidence: null,
     band: null,
     status: "draft",
-    checkerError,
   });
 }

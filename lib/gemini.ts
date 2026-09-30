@@ -1,7 +1,7 @@
 import "server-only";
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { normalizeVerdict, type Claim, type GeminiVerdict } from "./confidence";
-import { configuredModels, markModelNotFound, markModelWorking, modelCandidates } from "./geminiModel";
+import { configuredModels, markModelNotFound, markModelQuota, markModelWorking, modelCandidates } from "./geminiModel";
 
 const SYSTEM_INSTRUCTION = `You check a citizen air-quality photo for Project Vayuchakra in India.
 You do not decide the AQI. You only judge the photograph.
@@ -107,11 +107,11 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
     `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
     `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.`;
 
-  let error: CheckerError = "unknown";
-  let detail = "";
+  let error: CheckerError = "quota";
+  let detail = "every model is cooling down after a quota error";
   let model = configuredModels()[0];
-  const missing: string[] = [];
-  // A 404 moves on to the next model name; anything else is final for this photo.
+  const skipped: string[] = [];
+  // A 404 or a quota error moves on to the next model name; anything else is final for this photo.
   for await (const candidate of modelCandidates(apiKey)) {
     model = candidate;
     const r = await callModel(ai, model, input, prompt);
@@ -119,13 +119,14 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
       markModelWorking(model);
       return r;
     }
-    if (r.error !== "model_not_found") return r;
-    markModelNotFound(model);
-    missing.push(model);
+    if (r.error === "model_not_found") markModelNotFound(model);
+    else if (r.error === "quota") markModelQuota(model, r.detail);
+    else return r;
+    skipped.push(`${model} ${r.error}`);
     error = r.error;
     detail = r.detail;
   }
-  if (missing.length) detail = `no usable model (tried ${missing.join(", ")}): ${detail}`.slice(0, 500);
+  if (skipped.length) detail = `no usable model (${skipped.join(", ")}): ${detail}`.slice(0, 500);
   return { ok: false, error, detail, model };
 }
 

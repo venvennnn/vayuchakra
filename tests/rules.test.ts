@@ -92,3 +92,12 @@ test("Gemini model names: env mistakes are cleaned and discovered Flash models a
   ]);
   assert.deepEqual(ranked, ["gemini-3-flash", "gemini-2.0-flash", "gemini-3-flash-lite", "gemini-3-flash-preview"]);
 });
+
+test("Gemini quota cooldown follows Google's retry delay, and an hour for daily or zero limits", async () => {
+  const { quotaCooldownMs } = await import("../lib/geminiModelNames.ts");
+  assert.equal(quotaCooldownMs('{"retryDelay":"37s"}'), 37_000);
+  assert.equal(quotaCooldownMs("Please retry in 3.2s."), 15_000);
+  assert.equal(quotaCooldownMs("quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier"), 3_600_000);
+  assert.equal(quotaCooldownMs("limit: 0, model: gemini-2.5-flash"), 3_600_000);
+  assert.equal(quotaCooldownMs("RESOURCE_EXHAUSTED"), 60_000);
+});
