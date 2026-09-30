@@ -6,7 +6,7 @@ import { getHotspots, hotspotsNear, upwindFires } from "@/lib/firms";
 import { INDIA_GATE, parseLatLng } from "@/lib/geo";
 import { reverseGeocode } from "@/lib/geocode";
 import { getInsight } from "@/lib/insight";
-import { getNews, newsArea, newsConfigured } from "@/lib/news";
+import { getNewsResult, nearestNewsHub, newsArea, type NewsResult } from "@/lib/news";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -22,14 +22,22 @@ export async function GET(req: NextRequest) {
   const area = newsArea(placeName);
   // The explanation is cached per area, so NCR is always described from the same centre point.
   const basis = area === "Delhi NCR" ? INDIA_GATE : p;
-  const [news, live, weather, hotspots] = await Promise.all([
-    newsConfigured() ? getNews(area) : Promise.resolve(null),
+  const localNews = async (): Promise<{ result: NewsResult; newsArea: string }> => {
+    const first = await getNewsResult(area);
+    if (!first.ok || first.news.articles.length || area === "Delhi NCR") return { result: first, newsArea: area };
+    const hub = nearestNewsHub(p);
+    if (!hub || hub.toLowerCase() === area.toLowerCase()) return { result: first, newsArea: area };
+    const second = await getNewsResult(hub);
+    return second.ok && second.news.articles.length ? { result: second, newsArea: hub } : { result: first, newsArea: area };
+  };
+  const [{ result: news, newsArea: shownArea }, live, weather, hotspots] = await Promise.all([
+    localNews(),
     getLiveReading(basis.lat, basis.lng),
     getWeather(basis.lat, basis.lng),
     getHotspots().catch(() => []),
   ]);
 
-  const articles = news?.articles ?? [];
+  const articles = news.ok ? news.news.articles : [];
   let insight = null;
   if (live) {
     const aqi = pm25SubIndex(live.pm25);
@@ -53,7 +61,9 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     area,
-    newsAvailable: news !== null,
+    newsArea: shownArea,
+    newsAvailable: news.ok || news.error !== "not_configured",
+    newsError: news.ok ? null : news.error,
     articles: articles.slice(0, 8),
     insight,
   });
