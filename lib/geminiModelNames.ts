@@ -21,3 +21,11 @@ export function rankFlashModels(models: ListedModel[]): string[] {
       return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || a.localeCompare(b);
     });
 }
+
+/** How long to skip a model after a 429: Google's retryDelay when given, an hour for daily or zero limits. */
+export function quotaCooldownMs(detail: string): number {
+  if (/PerDay|per day|limit: 0\b/i.test(detail)) return 60 * 60 * 1000;
+  const m = detail.match(/retry(?:Delay)?[^0-9]{0,12}(\d+(?:\.\d+)?)\s*s/i);
+  const s = m ? Number(m[1]) : 60;
+  return Math.min(60 * 60, Math.max(15, Math.ceil(s))) * 1000;
+}

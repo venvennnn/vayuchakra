@@ -2,11 +2,14 @@ import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { ApiError } from "@google/genai";
 import { cached } from "./cache";
-import { markModelNotFound, markModelWorking, modelCandidates } from "./geminiModel";
+import { markModelNotFound, markModelQuota, markModelWorking, modelCandidates, quotaPressure } from "./geminiModel";
 import type { Lang } from "./copy";
 import type { Article } from "./news";
 
 const TTL_MS = 3 * 3600 * 1000;
+// Failures are not cached by `cached`, so without this every map click would call Gemini again.
+const FAILURE_BACKOFF_MS = 20 * 60 * 1000;
+const failedAt = new Map<string, number>();
 
 export type CauseKey =
   | "crop_burning"
@@ -91,13 +94,19 @@ async function generate(input: InsightInput): Promise<Insight | null> {
     `Return JSON: {"summary": "two short sentences", "causes": [{"key": "${CAUSES.join(" | ")}", "label": "2-4 words", "evidence": "one short sentence", "articles": [1]}], "confidence": "low | medium | high"}.\n` +
     `Give at most 3 causes, most likely first. Write summary, label and evidence in ${input.lang === "hi" ? "Hindi" : "English"}.`;
 
+  // Only 404s move on; after a quota error the summary waits so photo checks keep what is left.
   for await (const model of modelCandidates(apiKey)) {
     const r = await callModel(ai, model, input, prompt, headlines.length);
-    if (r !== "not_found") {
-      if (r) markModelWorking(model);
-      return r;
+    if (r === "not_found") {
+      markModelNotFound(model);
+      continue;
     }
-    markModelNotFound(model);
+    if (r && typeof r === "object" && "quota" in r) {
+      markModelQuota(model, r.quota);
+      return null;
+    }
+    if (r) markModelWorking(model);
+    return r;
   }
   return null;
 }
@@ -108,7 +117,7 @@ async function callModel(
   input: InsightInput,
   prompt: string,
   articleCount: number,
-): Promise<Insight | null | "not_found"> {
+): Promise<Insight | null | "not_found" | { quota: string }> {
   for (let i = 0; i < 2; i++) {
     try {
       const res = await ai.models.generateContent({
@@ -125,6 +134,8 @@ async function callModel(
       if (parsed) return { ...parsed, model, generatedAt: new Date().toISOString() };
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return "not_found";
+      const msg = e instanceof Error ? e.message : String(e);
+      if ((e instanceof ApiError && e.status === 429) || /RESOURCE_EXHAUSTED/.test(msg)) return { quota: msg.slice(0, 500) };
       console.error(`[insight] Gemini failed for ${input.area}: ${e instanceof Error ? e.message.slice(0, 300) : e}`);
     }
   }
@@ -133,5 +144,9 @@ async function callModel(
 
 export async function getInsight(input: InsightInput): Promise<Insight | null> {
   const bucket = Math.floor(Date.now() / TTL_MS);
-  return cached(`insight:v1:${input.area.toLowerCase()}:${input.lang}:${bucket}`, "insight", TTL_MS, () => generate(input));
+  const key = `insight:v1:${input.area.toLowerCase()}:${input.lang}:${bucket}`;
+  const skip = quotaPressure() || Date.now() - (failedAt.get(key) ?? 0) < FAILURE_BACKOFF_MS;
+  const result = await cached(key, "insight", TTL_MS, () => (skip ? Promise.resolve(null) : generate(input)));
+  if (!result && !skip) failedAt.set(key, Date.now());
+  return result;
 }

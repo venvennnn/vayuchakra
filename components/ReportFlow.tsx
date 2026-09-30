@@ -138,7 +138,7 @@ export default function ReportFlow(props: Props) {
       }
       const r = data as VerifyResult;
       setResult(r);
-      setAttemptsUsed(r.attempt);
+      setAttemptsUsed(3 - r.attemptsRemaining);
       setMessage(r.message);
       if (r.outcome === "retry") {
         setFile(null);
