@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cached, fetchJson } from "@/lib/cache";
+import { pm25SubIndex } from "@/lib/aqi";
 import { NCR_BBOX } from "@/lib/geo";
 import { supabaseAdmin } from "@/lib/supabase/server";
 
@@ -12,7 +13,7 @@ const TTL_MS = 3 * 3600 * 1000;
 type Feature = {
   type: "Feature";
   geometry: { type: "Point"; coordinates: [number, number] };
-  properties: { pm25: number; source: "cams" | "estimate" };
+  properties: { pm25: number; aqi: number; source: "cams" | "estimate" };
 };
 type Grid = { type: "FeatureCollection"; step: number; generatedAt: string; label: string; features: Feature[] };
 
@@ -99,7 +100,7 @@ async function buildGrid(): Promise<Grid | null> {
       features.push({
         type: "Feature",
         geometry: { type: "Point", coordinates: [lng, lat] },
-        properties: { pm25: Math.round(value), source: est !== undefined ? "estimate" : "cams" },
+        properties: { pm25: Math.round(value), aqi: pm25SubIndex(value), source: est !== undefined ? "estimate" : "cams" },
       });
     }
   }
@@ -107,7 +108,7 @@ async function buildGrid(): Promise<Grid | null> {
 }
 
 export async function GET() {
-  const grid = await cached<Grid>(`heatmap:ncr:${STEP}`, "heatmap", TTL_MS, buildGrid);
+  const grid = await cached<Grid>(`heatmap:v2:ncr:${STEP}`, "heatmap", TTL_MS, buildGrid);
   if (!grid) return NextResponse.json({ error: "heatmap_unavailable" }, { status: 503 });
   return NextResponse.json(grid);
 }

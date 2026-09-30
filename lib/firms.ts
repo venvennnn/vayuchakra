@@ -1,5 +1,5 @@
 import "server-only";
-import { haversineKm, NCR_BBOX, type LatLng } from "./geo";
+import { angleDiff, bearingDeg, FIRE_BBOX, haversineKm, type LatLng } from "./geo";
 import { supabaseAdmin } from "./supabase/server";
 
 const TTL_MS = 3 * 3600 * 1000;
@@ -55,7 +55,7 @@ function parseCsv(csv: string): Hotspot[] {
 
 /** Returns parsed rows, or null if the key is invalid or the request failed. */
 async function fetchSource(source: string, key: string): Promise<Hotspot[] | null> {
-  const { west, south, east, north } = NCR_BBOX;
+  const { west, south, east, north } = FIRE_BBOX;
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/${source}/${west},${south},${east},${north}/2`;
   const res = await fetch(url, { signal: AbortSignal.timeout(12000), cache: "no-store" });
   if (!res.ok) return null;
@@ -78,27 +78,41 @@ async function fetchFirms(): Promise<{ rows: Hotspot[]; ok: boolean }> {
   }
 }
 
+const PAGE = 1000;
+const MAX_ROWS = 20000;
+
 async function loadFromTable(): Promise<{ rows: Hotspot[]; fetchedAt: number } | null> {
   const sb = supabaseAdmin();
   if (!sb) return null;
-  const { data, error } = await sb
+  const { data: latest, error } = await sb
     .from("fire_hotspots")
-    .select("lat, lng, acq_at, confidence, frp, satellite, fetched_at")
+    .select("fetched_at")
     .order("fetched_at", { ascending: false })
-    .limit(5000);
-  if (error || !data?.length) return null;
-  const newest = new Date(data[0].fetched_at).getTime();
-  const rows = data
-    .filter((r) => new Date(r.fetched_at).getTime() === newest)
-    .map((r) => ({
-      lat: r.lat,
-      lng: r.lng,
-      acqAt: new Date(r.acq_at).toISOString(),
-      confidence: r.confidence as "n" | "h",
-      frp: r.frp,
-      satellite: r.satellite,
-    }));
-  return { rows, fetchedAt: newest };
+    .limit(1);
+  if (error || !latest?.length) return null;
+  const fetchedAtIso = latest[0].fetched_at as string;
+  const rows: Hotspot[] = [];
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data, error: pageErr } = await sb
+      .from("fire_hotspots")
+      .select("lat, lng, acq_at, confidence, frp, satellite")
+      .eq("fetched_at", fetchedAtIso)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (pageErr) return null;
+    for (const r of data ?? []) {
+      rows.push({
+        lat: r.lat,
+        lng: r.lng,
+        acqAt: new Date(r.acq_at).toISOString(),
+        confidence: r.confidence as "n" | "h",
+        frp: r.frp,
+        satellite: r.satellite,
+      });
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return { rows, fetchedAt: new Date(fetchedAtIso).getTime() };
 }
 
 async function refresh(): Promise<Hotspot[]> {
@@ -119,25 +133,24 @@ async function refresh(): Promise<Hotspot[]> {
   const sb = supabaseAdmin();
   if (sb) {
     const fetchedAt = new Date(at).toISOString();
-    if (fresh.rows.length) {
-      await sb.from("fire_hotspots").insert(
-        fresh.rows.map((r) => ({
-          lat: r.lat,
-          lng: r.lng,
-          acq_at: r.acqAt,
-          confidence: r.confidence,
-          frp: r.frp,
-          satellite: r.satellite,
-          fetched_at: fetchedAt,
-        })),
-      );
+    const rows = fresh.rows.slice(0, MAX_ROWS).map((r) => ({
+      lat: r.lat,
+      lng: r.lng,
+      acq_at: r.acqAt,
+      confidence: r.confidence,
+      frp: r.frp,
+      satellite: r.satellite,
+      fetched_at: fetchedAt,
+    }));
+    for (let i = 0; i < rows.length; i += PAGE) {
+      await sb.from("fire_hotspots").insert(rows.slice(i, i + PAGE));
     }
     await sb.from("fire_hotspots").delete().lt("fetched_at", fetchedAt);
   }
   return fresh.rows;
 }
 
-/** Hotspots for the NCR box, refreshed when the cached batch is older than 3 hours. */
+/** Hotspots for the North India box, refreshed when the cached batch is older than 3 hours. */
 export async function getHotspots(): Promise<Hotspot[]> {
   if (memo && Date.now() - memo.at < TTL_MS) return memo.rows;
   inflight ??= refresh().finally(() => {
@@ -157,4 +170,14 @@ export function hotspotsNear(all: Hotspot[], at: LatLng, radiusKm: number, maxAg
 
 export function firmsConfigured(): boolean {
   return !!process.env.FIRMS_MAP_KEY;
+}
+
+/** Fires from the last 48 h that lie upwind: within ±30° of the wind-from bearing and 400 km. */
+export function upwindFires(all: Hotspot[], at: LatLng, windFromDeg: number | null, maxKm = 400): HotspotNear[] {
+  if (windFromDeg === null) return [];
+  const cutoff = Date.now() - 48 * 3600 * 1000;
+  return all
+    .filter((h) => new Date(h.acqAt).getTime() >= cutoff)
+    .map((h) => ({ ...h, km: haversineKm(at, h) }))
+    .filter((h) => h.km > 5 && h.km <= maxKm && angleDiff(bearingDeg(at, h), windFromDeg) <= 30);
 }
