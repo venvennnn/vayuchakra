@@ -7,7 +7,7 @@ import { formatIstTime, formatKm, type LatLng } from "@/lib/geo";
 import type { Check } from "@/lib/reportChecks";
 import { BriefCard, ReviewBlock } from "@/components/Checks";
 import { MAP_COLORS } from "@/components/MapView";
-import { CAUSE_COLOR, ago, type Loadable, type NewsData } from "@/components/PlaceCard";
+import { CAUSE_COLOR, ago, KidExplain, type Loadable, type NewsData } from "@/components/PlaceCard";
 
 const CATS: CategoryKey[] = ["good", "satisfactory", "moderate", "poor", "very_poor", "severe"];
 const DAYTIME = new Intl.DateTimeFormat("en-GB", {
@@ -316,6 +316,7 @@ export function InsightTab({ lang, news }: { lang: Lang; news: Loadable<NewsData
           <p className="source-note">{t.insightConfidence[insight.confidence]}</p>
         </section>
       )}
+      {insight?.forAKid && <KidExplain lang={lang} text={insight.forAKid} />}
 
       {insight && insight.causes.length > 0 && (
         <section className="block">

@@ -25,6 +25,8 @@ export type Insight = {
   summary: string;
   causes: { key: CauseKey; label: string; evidence: string; articles: number[] }[];
   confidence: "low" | "medium" | "high";
+  /** Always English, simple, as if talking to an eight-year-old. */
+  forAKid: string;
   model: string;
   generatedAt: string;
 };
@@ -49,7 +51,8 @@ const SYSTEM = `You explain the likely drivers of today's air quality for Projec
 Use only the evidence given: the reading, the 24 h trend, wind, satellite fire counts, and the numbered news headlines.
 Never invent numbers, places, or events. If the evidence is thin, say so and set confidence to "low".
 Upwind satellite fires with wind blowing toward the area support crop or open burning. Low wind speed supports stagnant air trapping local pollution.
-Cite headlines only by their number. Reply only with the JSON object.`;
+Cite headlines only by their number.
+Also write for_a_kid: 4 to 6 short sentences in simple English, as if talking to an eight-year-old about this place right now. No jargon (say "tiny bits of dirt in the air" not PM2.5). No scary words. Say whether it is a better day to play outside or to stay in, using only the category you were given. Do not invent fires or news. Reply only with the JSON object.`;
 
 const CAUSES: CauseKey[] = ["crop_burning", "other_fires", "traffic", "construction_dust", "industry", "firecrackers", "weather", "other"];
 
@@ -73,7 +76,8 @@ function normalize(raw: unknown, articleCount: number): Omit<Insight, "model" | 
     .filter((c): c is Insight["causes"][number] => c !== null)
     .slice(0, 4);
   const confidence = ["low", "medium", "high"].includes(r.confidence as string) ? (r.confidence as Insight["confidence"]) : "low";
-  return { summary, causes, confidence };
+  const forAKid = typeof r.for_a_kid === "string" ? r.for_a_kid.trim().slice(0, 700) : "";
+  return { summary, causes, confidence, forAKid };
 }
 
 async function generate(input: InsightInput): Promise<Insight | null> {
@@ -91,8 +95,8 @@ async function generate(input: InsightInput): Promise<Insight | null> {
   };
   const prompt =
     `Evidence:\n${JSON.stringify(evidence, null, 2)}\n\nNews headlines from the last 7 days:\n${headlines.length ? headlines.join("\n") : "(none)"}\n\n` +
-    `Return JSON: {"summary": "two short sentences", "causes": [{"key": "${CAUSES.join(" | ")}", "label": "2-4 words", "evidence": "one short sentence", "articles": [1]}], "confidence": "low | medium | high"}.\n` +
-    `Give at most 3 causes, most likely first. Write summary, label and evidence in ${input.lang === "hi" ? "Hindi" : "English"}.`;
+    `Return JSON: {"summary": "two short sentences", "causes": [{"key": "${CAUSES.join(" | ")}", "label": "2-4 words", "evidence": "one short sentence", "articles": [1]}], "confidence": "low | medium | high", "for_a_kid": "4-6 short sentences in simple English for an eight-year-old"}.\n` +
+    `Give at most 3 causes, most likely first. Write summary, label and evidence in ${input.lang === "hi" ? "Hindi" : "English"}. Write for_a_kid in English even if the rest is Hindi.`;
 
   // Only 404s move on; after a quota error the summary waits so photo checks keep what is left.
   for await (const model of modelCandidates(apiKey)) {
@@ -144,7 +148,7 @@ async function callModel(
 
 export async function getInsight(input: InsightInput): Promise<Insight | null> {
   const bucket = Math.floor(Date.now() / TTL_MS);
-  const key = `insight:v1:${input.area.toLowerCase()}:${input.lang}:${bucket}`;
+  const key = `insight:v2:${input.area.toLowerCase()}:${input.lang}:${bucket}`;
   const skip = quotaPressure() || Date.now() - (failedAt.get(key) ?? 0) < FAILURE_BACKOFF_MS;
   const result = await cached(key, "insight", TTL_MS, () => (skip ? Promise.resolve(null) : generate(input)));
   if (!result && !skip) failedAt.set(key, Date.now());

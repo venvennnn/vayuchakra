@@ -57,6 +57,7 @@ export type NewsData = {
     confidence: "low" | "medium" | "high";
     model?: string;
     generatedAt?: string;
+    forAKid?: string;
   } | null;
   evidence?: {
     basis: string | null;
@@ -206,6 +207,7 @@ export default function PlaceCard(props: Props) {
       )}
 
       <Insight lang={lang} news={news} onMore={() => props.onOpenTab("insight")} />
+      {news.state === "ok" && news.data.insight?.forAKid && <KidExplain lang={lang} text={news.data.insight.forAKid} />}
 
       <p className="context">
         {nearby.state === "ok" ? nearby.data.sentence : nearby.state === "loading" ? "\u00a0" : t.ctxNothing}
@@ -385,6 +387,22 @@ function Insight({ lang, news, onMore }: { lang: Lang; news: Loadable<NewsData>;
           <p className="source-note">{t.insightConfidence[insight.confidence]}</p>
         </>
       )}
+    </section>
+  );
+}
+
+export function KidExplain({ lang, text }: { lang: Lang; text: string }) {
+  const t = COPY[lang];
+  return (
+    <section className="kid-explain" aria-label={t.kidTitle}>
+      <div className="insight-head">
+        <h3 className="section-title">{t.kidTitle}</h3>
+        <span className="badge-ai">{t.insightBadge}</span>
+      </div>
+      <p className="kid-note">{t.kidLangNote}</p>
+      <p className="kid-body" lang="en">
+        {text}
+      </p>
     </section>
   );
 }
