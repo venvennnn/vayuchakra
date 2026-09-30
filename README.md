@@ -22,7 +22,7 @@ With no keys set, the map, the CAMS/Open-Meteo air values, wind, and Nominatim p
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser: anonymous session, plus direct upload of large photos to a server-issued signed URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server routes only. All reads and writes go through it |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Server only: photo checks (`app/api/reports/verify`) and the "Why is the air like this?" summary (`app/api/news`, cached per area for 3 h) |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Server only: photo checks (`app/api/reports/verify`) and the "Why is the air like this?" summary (`app/api/news`, cached per area for 3 h). `GEMINI_MODEL` is optional. If Google answers 404 for it, both try `gemini-2.5-flash`, then `gemini-flash-latest`, then the newest Flash models the key can list, and log `[gemini] … using <model>` |
 | `GOOGLE_MAPS_API_KEY` | Air Quality API + Geocoding, server only. Restrict it by API (and by IP if your host allows), not by HTTP referrer |
 | `FIRMS_MAP_KEY` | NASA FIRMS area API, VIIRS NOAA-20 NRT (NOAA-21 retry) |
 | `DATA_GOV_IN_API_KEY` | CPCB real-time station index from data.gov.in (the ~600 station markers). Free key from data.gov.in → sign up → My Account |
