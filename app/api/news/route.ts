@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     area,
     newsAvailable: news !== null,
-    articles: articles.slice(0, 4),
+    articles: articles.slice(0, 8),
     insight,
   });
 }

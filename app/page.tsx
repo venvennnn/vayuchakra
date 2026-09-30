@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AboutDialog from "@/components/AboutDialog";
 import Intro from "@/components/Intro";
-import MapView, { type FlyTarget } from "@/components/MapView";
-import PlaceCard, { type AirData, type Loadable, type NearbyData } from "@/components/PlaceCard";
+import MapView, { type Basemap, type FlyTarget, type LayerKey, type Layers, type LayerStatus } from "@/components/MapView";
+import PlaceCard, { type AirData, type Loadable, type NearbyData, type NewsData } from "@/components/PlaceCard";
 import ReportFlow from "@/components/ReportFlow";
 import { COPY, type Lang } from "@/lib/copy";
 import { DEFAULT_ZOOM, INDIA_GATE, type LatLng } from "@/lib/geo";
@@ -37,8 +37,10 @@ export default function Page() {
   const [pinLocked, setPinLocked] = useState(false);
   const [checking, setChecking] = useState(false);
   const [about, setAbout] = useState<{ open: boolean; section: "about" | "how" }>({ open: false, section: "about" });
-  const [heatmapOn, setHeatmapOn] = useState(false);
-  const [stationsOn, setStationsOn] = useState(false);
+  const [basemap, setBasemap] = useState<Basemap>("satellite");
+  const [layers, setLayers] = useState<Layers>({ aqi: true, stations: true, fires: true, reports: true });
+  const [status, setStatus] = useState<LayerStatus | null>(null);
+  const [news, setNews] = useState<Loadable<NewsData>>({ state: "loading" });
   const [refreshKey, setRefreshKey] = useState(0);
   const [filerToken, setFilerToken] = useState("");
   const [placeName, setPlaceName] = useState<string | null | undefined>(undefined);
@@ -55,6 +57,10 @@ export default function Page() {
       if (saved === "hi" || saved === "en") setLang(saved);
     } catch {}
     void ensureAnonymousSession();
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => setStatus({ googleHeatmap: false, stations: false, fires: false, news: false, insight: false }));
   }, []);
 
   useEffect(() => {
@@ -140,6 +146,25 @@ export default function Page() {
     setNearby({ state: "loading" });
   }, [point]);
 
+  // News and the Gemini explanation are slower, so they load after the reading.
+  useEffect(() => {
+    if (!point) return;
+    const ctrl = new AbortController();
+    setNews({ state: "loading" });
+    const timer = setTimeout(() => {
+      fetch(`/api/news?lat=${point.lat.toFixed(4)}&lng=${point.lng.toFixed(4)}&lang=${lang}`, { signal: ctrl.signal })
+        .then(async (r) => {
+          if (!r.ok) throw new Error(String(r.status));
+          setNews({ state: "ok", data: await r.json() });
+        })
+        .catch((e) => e.name !== "AbortError" && setNews({ state: "error" }));
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [point, lang]);
+
   const onPick = useCallback(
     (p: LatLng) => {
       if (mode === "report" && pinLocked) return;
@@ -176,10 +201,11 @@ export default function Page() {
         flyTo={flyTo}
         pin={point}
         onPick={onPick}
-        heatmapOn={heatmapOn}
-        stationsOn={stationsOn}
-        onToggleHeatmap={() => setHeatmapOn((v) => !v)}
-        onToggleStations={() => setStationsOn((v) => !v)}
+        basemap={basemap}
+        onBasemap={setBasemap}
+        layers={layers}
+        onToggleLayer={(k: LayerKey) => setLayers((l) => ({ ...l, [k]: !l[k] }))}
+        status={status}
         reportsVersion={refreshKey}
       />
 
@@ -222,8 +248,7 @@ export default function Page() {
                 placeName={placeName}
                 air={air}
                 nearby={nearby}
-                heatmapOn={heatmapOn}
-                stationsOn={stationsOn}
+                news={news}
                 onReport={() => setMode("report")}
                 onHow={() => setAbout({ open: true, section: "how" })}
               />
