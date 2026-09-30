@@ -758,6 +758,23 @@ h3 {
   color: #7a3f12;
 }
 
+.notice-neutral {
+  background: #eef1f4;
+  color: #2c3a44;
+}
+
+.notice-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.notice-code {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .notice-ok {
   background: #e7f4ec;
   color: #1f5a3b;

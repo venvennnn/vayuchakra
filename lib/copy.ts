@@ -79,8 +79,11 @@ const en = {
     indoor: "This looks indoors. Step outside and retake it.",
     place_conflict: "This photo does not look like the pin. Retake it at the place you selected.",
     exif_far: "The photo’s location is {km} km from the pin. Retake it here, or move the pin.",
-    gemini_failed: "We could not check that photo. Try another.",
+    gemini_failed: "Our photo checker did not respond. This is a problem on our side, not with your photo. Try again.",
   } as Record<HardFailReason, string>,
+  refusedTitle: "Photo not accepted",
+  checkerTitle: "Couldn’t check the photo",
+  errorCode: (code: string) => `Error code: ${code}`,
   // Context sentence
   compass: { n: "north", ne: "northeast", e: "east", se: "southeast", s: "south", sw: "southwest", w: "west", nw: "northwest" } as Record<Compass, string>,
   ctxReportsFire: (n: number, km: string, dir: string, h: number, compass: string, speed: number) =>
@@ -192,8 +195,11 @@ const hi: Copy = {
     indoor: "यह अंदर की फ़ोटो लगती है। बाहर जाकर दोबारा लें।",
     place_conflict: "यह फ़ोटो पिन वाली जगह की नहीं लगती। चुनी गई जगह पर दोबारा लें।",
     exif_far: "फ़ोटो की लोकेशन पिन से {km} किमी दूर है। यहीं दोबारा लें, या पिन हटाएँ।",
-    gemini_failed: "हम उस फ़ोटो की जाँच नहीं कर सके। दूसरी आज़माएँ।",
+    gemini_failed: "हमारा फ़ोटो जाँचने वाला सिस्टम जवाब नहीं दे पाया। दिक्कत हमारी तरफ़ है, आपकी फ़ोटो में नहीं। फिर से कोशिश करें।",
   },
+  refusedTitle: "फ़ोटो स्वीकार नहीं हुई",
+  checkerTitle: "फ़ोटो जाँची नहीं जा सकी",
+  errorCode: (code) => `त्रुटि कोड: ${code}`,
   compass: { n: "उत्तर", ne: "उत्तर-पूर्व", e: "पूर्व", se: "दक्षिण-पूर्व", s: "दक्षिण", sw: "दक्षिण-पश्चिम", w: "पश्चिम", nw: "उत्तर-पश्चिम" },
   ctxReportsFire: (n, km, dir, h, compass, speed) =>
     `5 किमी के भीतर ${n} जाँची गई रिपोर्ट। ${h} घंटे पहले यहाँ से ${km} किमी ${dir} में एक सैटेलाइट हॉटस्पॉट था। हवा ${compass} से ${speed} km/h पर है, इसलिए पास का धुआँ यहाँ आ सकता है।`,
