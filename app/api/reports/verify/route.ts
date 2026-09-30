@@ -13,6 +13,7 @@ import { getHotspots, hotspotsNear } from "@/lib/firms";
 import { checkPhoto, type CheckerError } from "@/lib/gemini";
 import { haversineKm, isValidLatLng } from "@/lib/geo";
 import { getNews, newsArea } from "@/lib/news";
+import { buildChecks, type Check } from "@/lib/reportChecks";
 import { publishReport, UUID_RE } from "@/lib/reports";
 import { EVIDENCE_BUCKET, supabaseAdmin } from "@/lib/supabase/server";
 
@@ -35,6 +36,7 @@ function reply(body: {
   band: Band | null;
   status: "draft" | "published" | "rejected";
   checkerError?: CheckerError | null;
+  review?: { description: string; observations: string[]; visible: string; checks: Check[] } | null;
 }) {
   return NextResponse.json(body);
 }
@@ -178,13 +180,20 @@ export async function POST(req: NextRequest) {
   }
   const verdict = gemini.verdict;
   const reason = hardFailReason(verdict, exifKm);
+  const nearestFireKm = fires[0]?.km ?? null;
+  const review = {
+    description: verdict.description ?? "",
+    observations: verdict.observations ?? [],
+    visible: verdict.visible,
+    checks: buildChecks({ verdict, claim: report.claim as Claim, exifKm, nearestFireKm }),
+  };
   const scored =
     verdict && !reason
       ? computeConfidence({
           verdict,
           claim: report.claim as Claim,
           exifDistanceKm: exifKm,
-          nearestFireKm: fires[0]?.km ?? null,
+          nearestFireKm,
           previousHardFails,
         })
       : null;
@@ -196,7 +205,7 @@ export async function POST(req: NextRequest) {
     exif_lat: exif.gps?.lat ?? null,
     exif_lng: exif.gps?.lng ?? null,
     exif_taken_at: exif.takenAt,
-    gemini: { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, score_steps: scored?.steps ?? null },
+    gemini: { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, fire_km: nearestFireKm, score_steps: scored?.steps ?? null },
     hard_fail_reason: reason,
     confidence: scored?.score ?? null,
   });
@@ -219,6 +228,7 @@ export async function POST(req: NextRequest) {
       confidence: scored.score,
       band,
       status: pub.ok ? "published" : "draft",
+      review,
     });
   }
 
@@ -233,6 +243,7 @@ export async function POST(req: NextRequest) {
       confidence: null,
       band: null,
       status: "rejected",
+      review,
     });
   }
 
@@ -246,5 +257,6 @@ export async function POST(req: NextRequest) {
     confidence: null,
     band: null,
     status: "draft",
+    review,
   });
 }

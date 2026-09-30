@@ -1,5 +1,6 @@
 import "server-only";
-import type { Band, Claim } from "./confidence";
+import { normalizeVerdict, type Band, type Claim, type ScoreStep } from "./confidence";
+import { buildChecks, fireKmFromSteps, type Check } from "./reportChecks";
 import { haversineKm, kmToDegrees, type LatLng } from "./geo";
 import { supabaseAdmin } from "./supabase/server";
 
@@ -120,4 +121,80 @@ export async function publishReport(reportId: string, filerToken: string): Promi
     .eq("status", "draft");
   if (error) return { ok: false, error: "db_error" };
   return { ok: true, status: "published", attempt: attempt.attempt_no, confidence, band };
+}
+
+export type FeedReport = {
+  id: string;
+  claim: Claim;
+  createdAt: string;
+  km: number;
+  band: Band;
+  confidence: number | null;
+  placeName: string | null;
+  description: string;
+  observations: string[];
+  visible: string | null;
+  checks: Check[];
+};
+
+/**
+ * Published, map-visible reports near a point with what the checker saw. Only a curated
+ * summary leaves the server: never the raw Gemini reply, the photo, or the filer's note.
+ */
+export async function reportFeed(at: LatLng, radiusKm: number, days: number): Promise<FeedReport[] | null> {
+  const sb = supabaseAdmin();
+  if (!sb) return null;
+  const { dLat, dLng } = kmToDegrees(radiusKm, at.lat);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const { data, error } = await sb
+    .from("reports")
+    .select("id, created_at, claim, lat, lng, band, confidence, place_name, published_attempt")
+    .eq("status", "published")
+    .in("band", MAP_BANDS)
+    .gte("created_at", since)
+    .gte("lat", at.lat - dLat)
+    .lte("lat", at.lat + dLat)
+    .gte("lng", at.lng - dLng)
+    .lte("lng", at.lng + dLng)
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (error) return null;
+  const rows = (data ?? [])
+    .map((r) => ({ ...r, km: haversineKm(at, r) }))
+    .filter((r) => r.km <= radiusKm)
+    .slice(0, 30);
+  if (!rows.length) return [];
+
+  const { data: attempts } = await sb
+    .from("report_attempts")
+    .select("report_id, attempt_no, gemini")
+    .in(
+      "report_id",
+      rows.map((r) => r.id),
+    );
+  const byReport = new Map<string, Record<string, unknown>>();
+  for (const a of attempts ?? []) {
+    const row = rows.find((r) => r.id === a.report_id);
+    if (row && a.attempt_no === row.published_attempt) byReport.set(a.report_id, (a.gemini ?? {}) as Record<string, unknown>);
+  }
+
+  return rows.map((r) => {
+    const g = byReport.get(r.id);
+    const verdict = g ? normalizeVerdict(g.verdict) : null;
+    const exifKm = typeof g?.exif_km === "number" ? g.exif_km : null;
+    const fireKm = typeof g?.fire_km === "number" ? g.fire_km : fireKmFromSteps(g?.score_steps as ScoreStep[] | undefined);
+    return {
+      id: r.id,
+      claim: r.claim as Claim,
+      createdAt: r.created_at,
+      km: Math.round(r.km * 10) / 10,
+      band: r.band as Band,
+      confidence: r.confidence,
+      placeName: r.place_name,
+      description: verdict?.description ?? "",
+      observations: verdict?.observations ?? [],
+      visible: verdict?.visible ?? null,
+      checks: verdict ? buildChecks({ verdict, claim: r.claim as Claim, exifKm, nearestFireKm: fireKm }) : [],
+    };
+  });
 }

@@ -81,7 +81,7 @@ type Props = {
   visible: boolean;
   flyTo: FlyTarget | null;
   pin: LatLng | null;
-  onPick: (p: LatLng) => void;
+  onPick: (p: LatLng, meta?: { reportId?: string }) => void;
   basemap: Basemap;
   onBasemap: (b: Basemap) => void;
   layers: Layers;
@@ -183,7 +183,8 @@ export default function MapView(props: Props) {
       const hit = ids.length ? m.queryRenderedFeatures(e.point, { layers: ids })[0] : undefined;
       if (hit && hit.geometry.type === "Point") {
         const [lng, lat] = hit.geometry.coordinates as [number, number];
-        onPickRef.current({ lat, lng });
+        const reportId = hit.layer.id === "report-dots" ? (hit.properties as { id?: string }).id : undefined;
+        onPickRef.current({ lat, lng }, reportId ? { reportId } : undefined);
         return;
       }
       onPickRef.current({ lat: e.lngLat.lat, lng: e.lngLat.lng });

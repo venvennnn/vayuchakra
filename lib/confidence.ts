@@ -17,6 +17,10 @@ export type GeminiVerdict = {
   ask_for_another: boolean;
   retry_reason: string;
   confidence: number;
+  /** Plain description of the scene, in the filer's language. Shown publicly with the report. */
+  description?: string;
+  /** Short things the checker noticed, in the filer's language. */
+  observations?: string[];
 };
 
 export type HardFailReason =
@@ -126,5 +130,9 @@ export function normalizeVerdict(raw: unknown): GeminiVerdict | null {
     ask_for_another: bool(r.ask_for_another, false),
     retry_reason: str(r.retry_reason),
     confidence: num(r.confidence),
+    description: str(r.description).slice(0, 300),
+    observations: Array.isArray(r.observations)
+      ? r.observations.filter((o): o is string => typeof o === "string" && o.trim() !== "").map((o) => o.trim().slice(0, 140)).slice(0, 5)
+      : [],
   };
 }

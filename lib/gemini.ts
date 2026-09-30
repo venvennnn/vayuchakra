@@ -24,7 +24,9 @@ const SCHEMA_HINT = `{
   "fire_or_smoke_visible": false,
   "ask_for_another": false,
   "retry_reason": "",
-  "confidence": 0.0
+  "confidence": 0.0,
+  "description": "Dark grey smoke rising from a roof behind a row of houses; flames visible at the top floor.",
+  "observations": ["Image is sharp and well lit", "Smoke is dense and dark, typical of an active fire", "Hindi shop signs fit North India"]
 }`;
 
 const CLAIM_TEXT: Record<Claim, string> = {
@@ -105,7 +107,10 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
     `Context:\n${JSON.stringify(context, null, 2)}\n\n` +
     `Return one JSON object with exactly these keys:\n${SCHEMA_HINT}\n` +
     `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
-    `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.`;
+    `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.\n` +
+    `description: one or two plain sentences on what the photo shows, as a neutral observer. No people's identities, faces, number plates or house numbers.\n` +
+    `observations: 2 to 4 short phrases on what you checked and saw (image quality, what the smoke or dust looks like, place cues, anything inconsistent).\n` +
+    `Write description and observations in ${input.replyLanguage === "hi" ? "Hindi" : "English"}.`;
 
   let error: CheckerError = "quota";
   let detail = "every model is cooling down after a quota error";
