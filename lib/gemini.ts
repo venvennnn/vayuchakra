@@ -1,6 +1,7 @@
 import "server-only";
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { normalizeVerdict, type Claim, type GeminiVerdict } from "./confidence";
+import { configuredModels, markModelNotFound, markModelWorking, modelCandidates } from "./geminiModel";
 
 const SYSTEM_INSTRUCTION = `You check a citizen air-quality photo for Project Vayuchakra in India.
 You do not decide the AQI. You only judge the photograph.
@@ -85,9 +86,8 @@ export function classifyGeminiError(e: unknown): CheckerError {
 }
 
 export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { ok: false, error: "not_configured", detail: "GEMINI_API_KEY is not set", model };
+  if (!apiKey) return { ok: false, error: "not_configured", detail: "GEMINI_API_KEY is not set", model: configuredModels()[0] };
   const ai = new GoogleGenAI({ apiKey });
 
   const context = {
@@ -107,6 +107,29 @@ export async function checkPhoto(input: GeminiInput): Promise<GeminiResult> {
     `claim_fit and confidence are numbers from 0 to 1. confidence is how sure you are that this is a real outdoor photo of the claimed condition.\n` +
     `If you fill retry_reason, write one short sentence in ${input.replyLanguage === "hi" ? "Hindi" : "English"} telling the person what to retake.`;
 
+  let error: CheckerError = "unknown";
+  let detail = "";
+  let model = configuredModels()[0];
+  const missing: string[] = [];
+  // A 404 moves on to the next model name; anything else is final for this photo.
+  for await (const candidate of modelCandidates(apiKey)) {
+    model = candidate;
+    const r = await callModel(ai, model, input, prompt);
+    if (r.ok) {
+      markModelWorking(model);
+      return r;
+    }
+    if (r.error !== "model_not_found") return r;
+    markModelNotFound(model);
+    missing.push(model);
+    error = r.error;
+    detail = r.detail;
+  }
+  if (missing.length) detail = `no usable model (tried ${missing.join(", ")}): ${detail}`.slice(0, 500);
+  return { ok: false, error, detail, model };
+}
+
+async function callModel(ai: GoogleGenAI, model: string, input: GeminiInput, prompt: string): Promise<GeminiResult> {
   let error: CheckerError = "unknown";
   let detail = "";
   // One call plus one retry, whether the call errors or returns unparseable JSON.

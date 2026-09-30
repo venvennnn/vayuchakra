@@ -75,3 +75,20 @@ test("normalizeVerdict is cautious with missing fields", () => {
   assert.equal(v.outdoor_scene, false);
   assert.equal(v.image_quality, "obstructed");
 });
+
+test("Gemini model names: env mistakes are cleaned and discovered Flash models are ranked", async () => {
+  const { cleanModelName, rankFlashModels } = await import("../lib/geminiModelNames.ts");
+  assert.equal(cleanModelName(' "models/gemini-2.5-flash" '), "gemini-2.5-flash");
+  assert.equal(cleanModelName(undefined), "");
+  const gen = ["generateContent"];
+  const ranked = rankFlashModels([
+    { name: "models/gemini-2.0-flash", supportedGenerationMethods: gen },
+    { name: "models/gemini-3-flash-preview", supportedGenerationMethods: gen },
+    { name: "models/gemini-3-flash", supportedGenerationMethods: gen },
+    { name: "models/gemini-3-flash-lite", supportedGenerationMethods: gen },
+    { name: "models/gemini-3-flash-image", supportedGenerationMethods: gen },
+    { name: "models/gemini-3-pro", supportedGenerationMethods: gen },
+    { name: "models/gemini-2.5-flash", supportedGenerationMethods: ["embedContent"] },
+  ]);
+  assert.deepEqual(ranked, ["gemini-3-flash", "gemini-2.0-flash", "gemini-3-flash-lite", "gemini-3-flash-preview"]);
+});
