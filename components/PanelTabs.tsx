@@ -5,7 +5,7 @@ import type { Band, Claim } from "@/lib/confidence";
 import { CATEGORY_LABEL, COPY, type Lang } from "@/lib/copy";
 import { formatIstTime, formatKm, type LatLng } from "@/lib/geo";
 import type { Check } from "@/lib/reportChecks";
-import { ReviewBlock } from "@/components/Checks";
+import { BriefCard, ReviewBlock } from "@/components/Checks";
 import { MAP_COLORS } from "@/components/MapView";
 import { CAUSE_COLOR, ago, type Loadable, type NewsData } from "@/components/PlaceCard";
 
@@ -59,6 +59,14 @@ export type FeedItem = {
   observations: string[];
   visible: string | null;
   checks: Check[];
+  brief?: {
+    happened: string;
+    where: string;
+    evidence: string[];
+    exposed: string;
+    action: string;
+    uncertainty: string;
+  } | null;
 };
 
 export type FeedData = { available: boolean; reports: FeedItem[] };
@@ -441,6 +449,7 @@ export function ReportsTab({
               {r.confidence !== null ? ` · ${t.confidenceShort(r.confidence)}` : ""}
             </p>
             <ReviewBlock lang={lang} review={r} compact />
+            {r.brief && <BriefCard lang={lang} brief={r.brief} />}
           </li>
         ))}
       </ul>

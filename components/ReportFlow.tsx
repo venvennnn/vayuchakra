@@ -5,7 +5,7 @@ import { CLAIMS, type Band, type Claim } from "@/lib/confidence";
 import { COPY, type Lang } from "@/lib/copy";
 import { formatCoords, type LatLng } from "@/lib/geo";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { ReviewBlock, type Review } from "@/components/Checks";
+import { ReviewBlock, AssessmentPanel, type Review, type Assessment } from "@/components/Checks";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 // Vercel caps function request bodies at 4.5 MB; larger photos go straight to Storage.
@@ -23,6 +23,7 @@ type VerifyResult = {
   status: string;
   checkerError?: string | null;
   review?: Review | null;
+  assessment?: Assessment | null;
 };
 
 type Phase = "compose" | "checking" | "retry" | "published" | "rejected";
@@ -244,6 +245,9 @@ export default function ReportFlow(props: Props) {
 
       {phase === "retry" && message && result && <AttemptNotice lang={lang} result={result} />}
       {phase === "retry" && result?.review && <ReviewBlock lang={lang} review={result.review} />}
+      {phase === "retry" && result?.assessment && (
+        <AssessmentPanel lang={lang} assessment={result.assessment} score={result.confidence} />
+      )}
       {error && (
         <p className="notice notice-warn" role="alert">
           {error}
@@ -285,6 +289,7 @@ export default function ReportFlow(props: Props) {
             </div>
           )}
           {result.review && <ReviewBlock lang={lang} review={result.review} />}
+          {result.assessment && <AssessmentPanel lang={lang} assessment={result.assessment} score={result.confidence} />}
           {result.checkerError && <p className="muted small">{t.errorCode(result.checkerError)}</p>}
           <div className="actions">
             <button type="button" className="btn-primary" onClick={props.onFinished}>

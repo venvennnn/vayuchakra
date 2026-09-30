@@ -2,13 +2,21 @@ import exifr from "exifr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   bandFor,
+  combineAttempts,
   computeConfidence,
   hardFailReason,
+  liveModelLabel,
+  SCORE_RETRY_BELOW,
   type Band,
   type Claim,
+  type CombineAttempt,
   type HardFailReason,
+  type ScoreParts,
 } from "@/lib/confidence";
 import { COPY, hardFailMessage, type Lang } from "@/lib/copy";
+import { writeIncidentBrief, type IncidentBrief } from "@/lib/brief";
+import { getLiveReading, getWeather, SOURCE_LABEL, windCompass } from "@/lib/air";
+import { pm25SubIndex } from "@/lib/aqi";
 import { getHotspots, hotspotsNear } from "@/lib/firms";
 import { checkPhoto, type CheckerError } from "@/lib/gemini";
 import { haversineKm, isValidLatLng } from "@/lib/geo";
@@ -36,7 +44,14 @@ function reply(body: {
   band: Band | null;
   status: "draft" | "published" | "rejected";
   checkerError?: CheckerError | null;
-  review?: { description: string; observations: string[]; visible: string; checks: Check[] } | null;
+  review?: { description: string; observations: string[]; visible: string; checks: Check[]; contradictions: string[] } | null;
+  assessment?: {
+    model: string;
+    liveLabel: string;
+    parts: ScoreParts;
+    combined?: { best: number; bonus: number; penalty: number } | null;
+    brief: IncidentBrief | null;
+  } | null;
 }) {
   return NextResponse.json(body);
 }
@@ -133,15 +148,19 @@ export async function POST(req: NextRequest) {
   }
 
   const pin = { lat: report.lat as number, lng: report.lng as number };
-  const [exif, hotspots, prev, news] = await Promise.all([
+  const [exif, hotspots, prev, news, live, weather] = await Promise.all([
     readExif(bytes),
     getHotspots().catch(() => []),
-    sb.from("report_attempts").select("hard_fail_reason").eq("report_id", report.id).lt("attempt_no", attemptNo),
+    sb.from("report_attempts").select("hard_fail_reason, confidence, gemini").eq("report_id", report.id).lt("attempt_no", attemptNo),
     getNews(newsArea(report.place_name)).catch(() => null),
+    getLiveReading(pin.lat, pin.lng).catch(() => null),
+    getWeather(pin.lat, pin.lng),
   ]);
   const fires = hotspotsNear(hotspots, pin, 15, 48).slice(0, 5);
   const exifKm = exif.gps ? haversineKm(pin, exif.gps) : null;
   const previousHardFails = (prev.data ?? []).filter((r) => r.hard_fail_reason).length;
+  const aqi = live ? pm25SubIndex(live.pm25) : null;
+  const windFrom = weather ? windCompass(weather.windFromDeg) : null;
 
   const gemini = await checkPhoto({
     image: bytes,
@@ -159,6 +178,14 @@ export async function POST(req: NextRequest) {
       confidence: f.confidence,
       acquired_at: f.acqAt,
     })),
+    air: live ? { pm25: Math.round(live.pm25), aqi: aqi ?? 0, source: SOURCE_LABEL[live.source], observedAt: live.observedAt } : null,
+    weather: weather
+      ? {
+          windKmh: Math.round(weather.windKmh),
+          windFrom: windFrom,
+          temperatureC: Number.isFinite(weather.temperatureC) ? Math.round(weather.temperatureC) : null,
+        }
+      : null,
   });
 
   if (!gemini.ok) {
@@ -181,22 +208,24 @@ export async function POST(req: NextRequest) {
   const verdict = gemini.verdict;
   const reason = hardFailReason(verdict, exifKm);
   const nearestFireKm = fires[0]?.km ?? null;
+  const scored = !reason
+    ? computeConfidence({
+        verdict,
+        claim: report.claim as Claim,
+        exifDistanceKm: exifKm,
+        exifTakenAt: exif.takenAt,
+        nearestFireKm,
+        previousHardFails,
+        aqi,
+      })
+    : null;
   const review = {
     description: verdict.description ?? "",
     observations: verdict.observations ?? [],
     visible: verdict.visible,
     checks: buildChecks({ verdict, claim: report.claim as Claim, exifKm, nearestFireKm }),
+    contradictions: verdict.contradictions,
   };
-  const scored =
-    verdict && !reason
-      ? computeConfidence({
-          verdict,
-          claim: report.claim as Claim,
-          exifDistanceKm: exifKm,
-          nearestFireKm,
-          previousHardFails,
-        })
-      : null;
 
   const { error: insErr } = await sb.from("report_attempts").insert({
     report_id: report.id,
@@ -205,18 +234,79 @@ export async function POST(req: NextRequest) {
     exif_lat: exif.gps?.lat ?? null,
     exif_lng: exif.gps?.lng ?? null,
     exif_taken_at: exif.takenAt,
-    gemini: { model: gemini.model, verdict: gemini.verdict, raw: gemini.raw, exif_km: exifKm, fire_km: nearestFireKm, score_steps: scored?.steps ?? null },
+    gemini: {
+      model: gemini.model,
+      verdict: gemini.verdict,
+      raw: gemini.raw,
+      exif_km: exifKm,
+      fire_km: nearestFireKm,
+      aqi,
+      score_steps: scored?.steps ?? null,
+      parts: scored?.parts ?? null,
+    },
     hard_fail_reason: reason,
     confidence: scored?.score ?? null,
   });
   if (insErr) return NextResponse.json({ error: "db_error", message: COPY[lang].networkError }, { status: 503 });
 
   const attemptsRemaining = 3 - attemptNo;
+  const t = COPY[lang];
+  const assessmentBase = { model: gemini.model, liveLabel: liveModelLabel(gemini.model), parts: scored?.parts ?? emptyParts(), combined: null as { best: number; bonus: number; penalty: number } | null, brief: null as IncidentBrief | null };
 
-  if (scored) {
-    const pub = await publishReport(report.id, filerToken);
-    const band = pub.ok ? pub.band : bandFor(scored.score);
-    const t = COPY[lang];
+  const passing: CombineAttempt[] = (prev.data ?? [])
+    .filter((r) => !r.hard_fail_reason && r.confidence != null)
+    .map((r) => {
+      const g = (r.gemini ?? {}) as { verdict?: { visible?: string; contradictions?: string[] } };
+      return {
+        score: r.confidence as number,
+        visible: g.verdict?.visible ?? "unclear",
+        contradictions: g.verdict?.contradictions ?? [],
+      };
+    });
+  if (scored) passing.push({ score: scored.score, visible: verdict.visible, contradictions: verdict.contradictions });
+
+  const shouldPublish = passing.length > 0 && (attemptsRemaining === 0 || (scored !== null && scored.score >= SCORE_RETRY_BELOW));
+  if (shouldPublish) {
+    const combined = combineAttempts(passing);
+    const best = passing.reduce((a, b) => (b.score > a.score ? b : a));
+    const pub = await publishReport(report.id, filerToken, { confidence: combined.score, attempt: attemptNo });
+    const band = pub.ok ? pub.band : bandFor(combined.score);
+    const brief = await writeIncidentBrief({
+      lang,
+      placeName: report.place_name,
+      pin,
+      claim: report.claim as Claim,
+      verdict,
+      score: combined.score,
+      band,
+      attempts: attemptNo,
+      aqi,
+      pm25: live ? Math.round(live.pm25) : null,
+      windKmh: weather ? Math.round(weather.windKmh) : null,
+      windFrom,
+      firesWithin15km: fires.length,
+      nearestFireKm,
+    }).catch(() => null);
+    if (brief) {
+      await sb
+        .from("report_attempts")
+        .update({
+          gemini: {
+            model: gemini.model,
+            verdict: gemini.verdict,
+            raw: gemini.raw,
+            exif_km: exifKm,
+            fire_km: nearestFireKm,
+            aqi,
+            score_steps: scored?.steps ?? null,
+            parts: scored?.parts ?? null,
+            combined,
+            brief,
+          },
+        })
+        .eq("report_id", report.id)
+        .eq("attempt_no", attemptNo);
+    }
     const message =
       band === "corroborated" ? t.publishedCorroborated : band === "plausible" ? t.publishedPlausible : t.publishedUnverified;
     return reply({
@@ -225,10 +315,11 @@ export async function POST(req: NextRequest) {
       outcome: "published",
       reason: null,
       message,
-      confidence: scored.score,
+      confidence: combined.score,
       band,
       status: pub.ok ? "published" : "draft",
       review,
+      assessment: { ...assessmentBase, parts: scored?.parts ?? emptyParts(), combined: { best: best.score, bonus: combined.bonus, penalty: combined.penalty }, brief },
     });
   }
 
@@ -240,23 +331,37 @@ export async function POST(req: NextRequest) {
       outcome: "rejected",
       reason,
       message: COPY[lang].rejected,
-      confidence: null,
+      confidence: scored?.score ?? null,
       band: null,
       status: "rejected",
       review,
+      assessment: { ...assessmentBase, parts: scored?.parts ?? emptyParts() },
     });
   }
 
-  const geminiLine = verdict && reason && GEMINI_REASONS.includes(reason) ? verdict.retry_reason.trim() : "";
+  const lowScore = scored !== null && scored.score < SCORE_RETRY_BELOW;
+  const geminiLine = verdict.retry_reason.trim();
+  const message = geminiLine
+    ? geminiLine
+    : reason && GEMINI_REASONS.includes(reason)
+      ? hardFailMessage(lang, reason, exifKm ?? undefined)
+      : lowScore
+        ? t.scoreTooLow(scored.score)
+        : hardFailMessage(lang, reason ?? "quality", exifKm ?? undefined);
   return reply({
     attempt: attemptNo,
     attemptsRemaining,
     outcome: "retry",
     reason,
-    message: geminiLine || hardFailMessage(lang, reason!, exifKm ?? undefined),
-    confidence: null,
+    message,
+    confidence: scored?.score ?? null,
     band: null,
     status: "draft",
     review,
+    assessment: { ...assessmentBase, parts: scored?.parts ?? emptyParts() },
   });
+}
+
+function emptyParts(): ScoreParts {
+  return { quality: 0, event: 0, location: 0, sensor: 0, report: 0 };
 }
