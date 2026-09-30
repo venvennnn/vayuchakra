@@ -103,7 +103,7 @@ export default function MapView(props: Props) {
     });
 
     m.on("click", (e) => {
-      const hit = m.queryRenderedFeatures(e.point, { layers: ["report-dots"] })[0];
+      const hit = m.getLayer("report-dots") ? m.queryRenderedFeatures(e.point, { layers: ["report-dots"] })[0] : undefined;
       if (hit && hit.geometry.type === "Point") {
         const [lng, lat] = hit.geometry.coordinates as [number, number];
         onPickRef.current({ lat, lng });

@@ -39,13 +39,19 @@ function reply(body: {
 
 async function readExif(buf: Buffer) {
   try {
-    const out = await exifr.parse(buf, { gps: true, tiff: true, exif: true, pick: ["DateTimeOriginal", "CreateDate", "latitude", "longitude"] });
+    const out = await exifr.parse(buf, { gps: true });
     if (!out) return { gps: null, takenAt: null };
     const lat = Number(out.latitude);
     const lng = Number(out.longitude);
     const gps = isValidLatLng(lat, lng) && !(lat === 0 && lng === 0) ? { lat, lng } : null;
+    // GPS date/time stamps are UTC; DateTimeOriginal has no zone, so it is only a fallback.
+    let takenAt: string | null = null;
+    if (typeof out.GPSDateStamp === "string" && typeof out.GPSTimeStamp === "string") {
+      const d = new Date(`${out.GPSDateStamp.replace(/:/g, "-")}T${out.GPSTimeStamp.split(".")[0]}Z`);
+      if (!Number.isNaN(d.getTime())) takenAt = d.toISOString();
+    }
     const t = out.DateTimeOriginal ?? out.CreateDate;
-    const takenAt = t instanceof Date && !Number.isNaN(t.getTime()) ? t.toISOString() : null;
+    if (!takenAt && t instanceof Date && !Number.isNaN(t.getTime())) takenAt = t.toISOString();
     return { gps, takenAt };
   } catch {
     return { gps: null, takenAt: null };

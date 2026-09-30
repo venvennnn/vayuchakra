@@ -884,7 +884,7 @@ h3 {
   }
 
   .banner {
-    top: 54px;
+    top: 64px;
     left: 12px;
     right: 12px;
     max-width: none;
@@ -901,7 +901,7 @@ h3 {
 
   .map-controls {
     right: 12px;
-    top: 100px;
+    top: 112px;
     bottom: auto;
   }
 
