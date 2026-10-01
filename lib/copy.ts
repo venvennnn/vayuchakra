@@ -268,32 +268,57 @@ const en = {
   // About
   aboutTitle: "About Project Vayuchakra",
   aboutIntro:
-    "A single map for Delhi NCR. It shows what the air is doing at a point right now, and lets people file photo reports.",
+    "Project Vayuchakra is a live air map for Delhi NCR and nearby North India. Tap any point: you get the hourly air there, nearby CPCB stations, satellite fires upwind, local pollution news, and a Gemini reading of what is likely driving the air. People can also file a photo that is actually checked — not just uploaded.",
   aboutDisclaimer:
-    "Illustrative hotspot field where noted. Live air values come from Google Air Quality or CAMS. Citizen photos are checked by Gemini and are not official CPCB readings.",
+    "The big number is hourly PM2.5 on the India AQI scale, not CPCB’s official 24-hour index. Citizen photos are checked by Gemini and are not official readings. Where a layer is modelled, the map says so.",
+  aboutMapTitle: "The map",
+  aboutMap: [
+    "Satellite imagery by default (Esri), or a light street map. You can toggle the AQI heatmap, CPCB stations, satellite fires and citizen reports.",
+    "The coloured heatmap is Google Air Quality tiles (US AQI colours) when the Google key is set. Without it, NCR gets a coarser CAMS model grid coloured on the India AQI scale.",
+    "Station dots are CPCB’s own published index from data.gov.in — the only official measured numbers on the site, about 600 of them. Hover for the reading; click to select that point.",
+    "Glowing dots are NASA FIRMS VIIRS fire detections from the last 48 hours across Punjab, Haryana, Delhi and western Uttar Pradesh. The card counts fires within 50 km and upwind within 400 km, because smoke travels.",
+  ],
+  aboutLiveTitle: "What you see for a point",
+  aboutLive: [
+    "The header is tinted by category and shows health advice, temperature and wind, a six-pollutant grid (PM2.5, PM10, NO₂, O₃, CO, SO₂), and the next 24 hours of PM2.5 as a chart.",
+    "The City tab lists CPCB stations in that city (or within 25 km), the city average, highest and lowest, which pollutant is leading, and fire and report counts.",
+    "The News tab pulls Google News via SerpApi for pollution, AQI, smog and fire. Small places with no headlines show the nearest city instead.",
+    "Widen the panel if you want those grids side by side. Everything stays on the same page.",
+  ],
+  aboutAiTitle: "What Gemini does",
+  aboutAi: [
+    "“Why is the air like this?” is a Gemini summary of only the evidence we already have: the reading, the 24-hour trend, wind, fire counts and numbered headlines. It names likely causes and cites headlines by number. It never changes the AQI number.",
+    "“Can you explain this like I’m a kid?” is the same evidence in simple English, as if talking to an eight-year-old. No jargon, no invented fires.",
+    "Photo reports are a live multimodal Gemini call. We send the photograph plus what you claimed, the pin, capture time, EXIF GPS, nearby AQI, wind and nearby satellite fires. Headlines are background only; Gemini is told to judge the photo, not the news.",
+    "Gemini returns what the photo shows, quality, consistencies and contradictions. Vayuchakra then calculates the evidence score itself: 30% image quality, 25% visual-event match, 20% location/time, 15% satellite or sensor, 10% report consistency. Gemini does not invent that percentage.",
+    "Below 60, it asks for a specific retake — closer, include a landmark, too dark — for up to three tries. The final score is the best photo, plus a bonus if the photos agree, minus a penalty for contradictions.",
+    "After a photo is accepted, Gemini writes a short incident brief for officers: what probably happened, where, the evidence, nearby areas, a recommended action, and what is still uncertain. Other people see that story on the Reports tab, never the image.",
+  ],
   howTitle: "How this number is made",
   howBody: [
-    "We take the latest hourly PM2.5 at the point from Google Air Quality. If Google has no PM2.5 value, we use the CAMS global model via Open-Meteo, which is about 45 km coarse.",
-    "We place that hourly value on the CPCB 2014 India AQI breakpoints for PM2.5. CPCB’s official index uses a 24-hour average, so this is not the official CPCB AQI.",
-    "If a same-day LightGBM spatial estimate exists for the point, it is shown as a separate line. It is a reconstruction, not a forecast.",
+    "We take the latest hourly PM2.5 at the point from Google Air Quality. If Google has no PM2.5 value, we use the CAMS global model via Open-Meteo, which is about 45 km coarse. The line under the number always names the source.",
+    "We place that hourly value on the CPCB 2014 India AQI breakpoints for PM2.5. CPCB’s official index uses a 24-hour average and whichever pollutant is worst at a station, so this is not the official CPCB AQI — it reacts faster and can be higher or lower.",
+    "If a same-day LightGBM spatial estimate exists for the point, it is shown as a separate line. It is a reconstruction, not a forecast. The 24-hour bars are the same source’s hourly forecast, converted the same way.",
   ],
   sourcesTitle: "Data sources",
   sources: [
-    "Google Air Quality API — current and hourly forecast PM2.5",
-    "CAMS global forecast via Open-Meteo — fallback PM2.5",
-    "Open-Meteo Forecast API — wind",
-    "NASA FIRMS, VIIRS NOAA-20 — satellite fire hotspots",
+    "Google Air Quality API — current and hourly forecast PM2.5 and other pollutants",
     "Google Air Quality heatmap tiles — the coloured AQI layer (US AQI colours)",
-    "CPCB real-time station index via data.gov.in — station markers",
-    "NASA FIRMS, VIIRS NOAA-20 — satellite fire hotspots across Punjab, Haryana, Delhi and western UP",
-    "SerpApi Google News — local pollution headlines",
-    "Gemini — photo checks and the “Why is the air like this?” summary",
+    "CAMS global forecast via Open-Meteo — fallback PM2.5",
+    "Open-Meteo Forecast API — wind and temperature",
+    "CPCB real-time station index via data.gov.in — station markers and the City tab",
+    "NASA FIRMS, VIIRS NOAA-20 (NOAA-21 retry) — satellite fire hotspots across Punjab, Haryana, Delhi and western UP",
+    "SerpApi Google News — local pollution, AQI, smog and fire headlines",
+    "Gemini — photo checks, the “Why is the air like this?” summary, the kid explanation, and the incident brief",
     "Google Geocoding, then OpenStreetMap Nominatim — place names",
     "Imagery © Esri, Maxar, Earthstar Geographics · Map © OpenStreetMap contributors © CARTO",
   ],
   photosTitle: "Photo reports",
   photosBody:
-    "Photo checks use Gemini. It looks at whether the scene is outdoors, matches what you chose, fits the pin, and agrees with nearby satellite fires. Each report gets 3 photo tries. Low-confidence reports are saved but not shown.",
+    "Each report gets three photo tries. A checker failure on our side (quota, missing model) does not use up a try. Only corroborated and plausible reports appear on the map. Photos and your note stay private; the public feed shows what was reported, when, how far, what the checker saw, and the brief.",
+  aboutPrivacyTitle: "Keys and privacy",
+  aboutPrivacy:
+    "Gemini, Google, FIRMS, data.gov.in, SerpApi and the database service role stay on the server. The browser never receives those keys. All report reads and writes go through Next.js routes with the service role; there are no open database policies for attempts or Gemini JSON.",
 };
 
 type Copy = typeof en;
@@ -545,19 +570,57 @@ const hi: Copy = {
   ctxNothing: "5 किमी के भीतर कोई जाँची गई रिपोर्ट नहीं। ऊपर की संख्या इस जगह का प्रति घंटा मान है, सड़क का सेंसर नहीं।",
   aboutTitle: "प्रोजेक्ट वायुचक्र के बारे में",
   aboutIntro:
-    "दिल्ली NCR के लिए एक नक्शा। यह बताता है कि किसी जगह पर अभी हवा कैसी है, और लोगों को फ़ोटो रिपोर्ट भेजने देता है।",
+    "प्रोजेक्ट वायुचक्र दिल्ली NCR और आस-पास के उत्तर भारत का लाइव हवा का नक्शा है। किसी भी जगह पर टैप करें: वहाँ की प्रति घंटा हवा, पास के CPCB स्टेशन, हवा की दिशा वाली सैटेलाइट आग, स्थानीय प्रदूषण की ख़बरें, और Gemini की पढ़ाई कि हवा ऐसी क्यों लग रही है। लोग फ़ोटो भी भेज सकते हैं — वह सिर्फ़ अपलोड नहीं होती, जाँची जाती है।",
   aboutDisclaimer:
-    "जहाँ लिखा है, हॉटस्पॉट परत केवल उदाहरण है। लाइव हवा के मान Google Air Quality या CAMS से आते हैं। नागरिकों की फ़ोटो Gemini से जाँची जाती हैं और ये आधिकारिक CPCB माप नहीं हैं।",
+    "बड़ी संख्या प्रति घंटा PM2.5 है, भारत AQI पैमाने पर — CPCB का आधिकारिक 24 घंटे का सूचकांक नहीं। नागरिकों की फ़ोटो Gemini जाँचता है; ये आधिकारिक माप नहीं हैं। जहाँ परत मॉडल है, नक्शा वह कहता है।",
+  aboutMapTitle: "नक्शा",
+  aboutMap: [
+    "डिफ़ॉल्ट सैटेलाइट तस्वीर (Esri), या हल्का स्ट्रीट मैप। AQI हीटमैप, CPCB स्टेशन, सैटेलाइट आग और नागरिक रिपोर्ट ऑन-ऑफ किए जा सकते हैं।",
+    "रंगीन हीटमैप Google Air Quality टाइलें हैं (US AQI रंग), जब Google की चाबी लगी हो। नहीं तो NCR के लिए मोटा CAMS मॉडल ग्रिड, भारत AQI पैमाने पर।",
+    "स्टेशन बिन्दु data.gov.in से CPCB का अपना प्रकाशित सूचकांक हैं — साइट पर एकमात्र आधिकारिक मापे गए आँकड़े, लगभग 600। होवर पर माप; क्लिक से वह जगह चुनें।",
+    "चमकते बिन्दु NASA FIRMS VIIRS की आग हैं, पिछले 48 घंटे, पंजाब, हरियाणा, दिल्ली और पश्चिमी उत्तर प्रदेश में। कार्ड 50 किमी के भीतर और हवा की दिशा में 400 किमी तक आग गिनता है, क्योंकि धुआँ चलता है।",
+  ],
+  aboutLiveTitle: "एक जगह पर क्या दिखता है",
+  aboutLive: [
+    "हेडर श्रेणी के रंग में है: स्वास्थ्य सलाह, तापमान और हवा, छह प्रदूषक (PM2.5, PM10, NO₂, O₃, CO, SO₂), और अगले 24 घंटे का PM2.5 चार्ट।",
+    "शहर टैब: उस शहर (या 25 किमी) के CPCB स्टेशन, औसत, सबसे ज़्यादा और सबसे कम, मुख्य प्रदूषक, आग और रिपोर्ट की गिनती।",
+    "ख़बर टैब: SerpApi से Google News — प्रदूषण, AQI, स्मॉग, आग। छोटी जगह पर ख़बर न हो तो सबसे पास का शहर।",
+    "ग्रिड साथ-साथ देखने के लिए पैनल चौड़ा करें। सब एक ही पेज पर रहता है।",
+  ],
+  aboutAiTitle: "Gemini क्या करता है",
+  aboutAi: [
+    "“हवा ऐसी क्यों है?” सिर्फ़ उसी सबूत का Gemini सारांश है जो हमारे पास पहले से है: माप, 24 घंटे का रुझान, हवा, आग की गिनती और नंबर लगी ख़बरें। संभावित कारण बताता है और ख़बरों का नंबर से हवाला देता है। AQI की संख्या वह नहीं बदलता।",
+    "“क्या बच्चे की तरह समझा सकते हो?” वही सबूत आसान अंग्रेज़ी में, जैसे आठ साल के बच्चे से बात हो। कठिन शब्द नहीं, बनाई हुई आग नहीं।",
+    "फ़ोटो रिपोर्ट एक लाइव मल्टीमॉडल Gemini कॉल है। हम फ़ोटो के साथ आपका दावा, पिन, कैप्चर समय, EXIF GPS, पास का AQI, हवा और पास की सैटेलाइट आग भेजते हैं। ख़बरें केवल पृष्ठभूमि हैं; Gemini को फ़ोटो पर फ़ैसला करने को कहा जाता है, ख़बर पर नहीं।",
+    "Gemini बताता है फ़ोटो में क्या है, गुणवत्ता, संगति और विरोध। सबूत स्कोर वायुचक्र खुद गिनता है: 30% फ़ोटो गुणवत्ता, 25% दृश्य घटना, 20% जगह/समय, 15% सैटेलाइट या सेंसर, 10% रिपोर्ट की संगति। यह प्रतिशत Gemini नहीं बनाता।",
+    "60 से कम पर वह साफ़ कहता है कि नई फ़ोटो कैसे लें — पास से, निशान के साथ, अँधेरी न हो — तीन कोशिश तक। अंतिम स्कोर सबसे अच्छी फ़ोटो + सहमत फ़ोटो का बोनस − विरोध की कटौती।",
+    "फ़ोटो स्वीकार होने पर Gemini अधिकारियों के लिए छोटा घटना संक्षेप लिखता है: शायद क्या हुआ, कहाँ, सबूत, आस-पास के इलाके, सुझाया कदम, और क्या अधूरा है। रिपोर्ट टैब पर दूसरों को यही कहानी दिखती है, फ़ोटो नहीं।",
+  ],
   howTitle: "यह संख्या कैसे बनती है",
   howBody: [
-    "हम उस जगह का ताज़ा प्रति घंटा PM2.5 Google Air Quality से लेते हैं। अगर Google के पास PM2.5 नहीं है, तो Open-Meteo के ज़रिए CAMS वैश्विक मॉडल लेते हैं, जो लगभग 45 किमी मोटा है।",
-    "इस प्रति घंटा मान को PM2.5 के CPCB 2014 भारत AQI ब्रेकपॉइंट पर रखते हैं। CPCB का आधिकारिक सूचकांक 24 घंटे का औसत लेता है, इसलिए यह आधिकारिक CPCB AQI नहीं है।",
-    "अगर उस जगह के लिए उसी दिन का LightGBM स्थानिक अनुमान है, तो वह अलग पंक्ति में दिखता है। यह पुनर्निर्माण है, पूर्वानुमान नहीं।",
+    "हम उस जगह का ताज़ा प्रति घंटा PM2.5 Google Air Quality से लेते हैं। अगर Google के पास PM2.5 नहीं है, तो Open-Meteo के ज़रिए CAMS वैश्विक मॉडल लेते हैं, जो लगभग 45 किमी मोटा है। संख्या के नीचे हमेशा स्रोत लिखा होता है।",
+    "इस प्रति घंटा मान को PM2.5 के CPCB 2014 भारत AQI ब्रेकपॉइंट पर रखते हैं। CPCB का आधिकारिक सूचकांक 24 घंटे का औसत और स्टेशन पर सबसे ख़राब प्रदूषक लेता है, इसलिए यह आधिकारिक CPCB AQI नहीं है — यह जल्दी बदलता है और ऊँचा या नीचा हो सकता है।",
+    "अगर उस जगह के लिए उसी दिन का LightGBM स्थानिक अनुमान है, तो वह अलग पंक्ति में दिखता है। यह पुनर्निर्माण है, पूर्वानुमान नहीं। 24 घंटे की पट्टियाँ उसी स्रोत का प्रति घंटा पूर्वानुमान हैं, उसी तरह बदला हुआ।",
   ],
   sourcesTitle: "डेटा स्रोत",
+  sources: [
+    "Google Air Quality API — वर्तमान और प्रति घंटा पूर्वानुमान PM2.5 और अन्य प्रदूषक",
+    "Google Air Quality हीटमैप टाइलें — रंगीन AQI परत (US AQI रंग)",
+    "CAMS वैश्विक पूर्वानुमान, Open-Meteo — वैकल्पिक PM2.5",
+    "Open-Meteo Forecast API — हवा और तापमान",
+    "CPCB रियल-टाइम स्टेशन सूचकांक, data.gov.in — स्टेशन चिह्न और शहर टैब",
+    "NASA FIRMS, VIIRS NOAA-20 (NOAA-21 पुनः) — पंजाब, हरियाणा, दिल्ली और पश्चिमी UP की सैटेलाइट आग",
+    "SerpApi Google News — स्थानीय प्रदूषण, AQI, स्मॉग और आग की ख़बरें",
+    "Gemini — फ़ोटो जाँच, “हवा ऐसी क्यों है?”, बच्चे जैसी व्याख्या, और घटना संक्षेप",
+    "Google Geocoding, फिर OpenStreetMap Nominatim — जगह के नाम",
+    "Imagery © Esri, Maxar, Earthstar Geographics · Map © OpenStreetMap contributors © CARTO",
+  ],
   photosTitle: "फ़ोटो रिपोर्ट",
   photosBody:
-    "फ़ोटो की जाँच Gemini करता है। वह देखता है कि दृश्य बाहर का है या नहीं, आपके चुने प्रकार से मेल खाता है या नहीं, पिन से मेल खाता है या नहीं, और पास की सैटेलाइट आग से सहमत है या नहीं। हर रिपोर्ट को फ़ोटो के 3 मौके मिलते हैं। कम भरोसे वाली रिपोर्ट सहेजी जाती हैं पर दिखाई नहीं जातीं।",
+    "हर रिपोर्ट को फ़ोटो के तीन मौके मिलते हैं। हमारी तरफ़ की नाकामी (कोटा, मॉडल नहीं मिला) मौका नहीं खाती। नक्शे पर केवल जाँची गई और संभावित रिपोर्ट दिखती हैं। फ़ोटो और नोट निजी रहते हैं; सार्वजनिक सूची में क्या बताया गया, कब, कितनी दूर, जाँच में क्या दिखा, और संक्षेप दिखता है।",
+  aboutPrivacyTitle: "चाबियाँ और गोपनीयता",
+  aboutPrivacy:
+    "Gemini, Google, FIRMS, data.gov.in, SerpApi और डेटाबेस की सेवा-भूमिका सर्वर पर रहती हैं। ब्राउज़र को ये चाबियाँ नहीं मिलतीं। रिपोर्ट की पढ़ाई-लिखाई Next.js रूटों से सेवा-भूमिका के साथ होती है; प्रयासों या Gemini JSON के लिए कोई खुली डेटाबेस नीति नहीं है।",
 };
 
 export const COPY: Record<Lang, Copy> = { en, hi };
