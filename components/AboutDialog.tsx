@@ -53,6 +53,20 @@ export default function AboutDialog({ lang, open, section, onClose }: Props) {
           <p>{t.aboutIntro}</p>
           <p className="disclaimer">{t.aboutDisclaimer}</p>
 
+          <section>
+            <h3>{t.aboutMapTitle}</h3>
+            {t.aboutMap.map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+          </section>
+
+          <section>
+            <h3>{t.aboutLiveTitle}</h3>
+            {t.aboutLive.map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+          </section>
+
           <section ref={howRef}>
             <h3>{t.howTitle}</h3>
             {t.howBody.map((p) => (
@@ -61,8 +75,20 @@ export default function AboutDialog({ lang, open, section, onClose }: Props) {
           </section>
 
           <section>
+            <h3>{t.aboutAiTitle}</h3>
+            {t.aboutAi.map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+          </section>
+
+          <section>
             <h3>{t.photosTitle}</h3>
             <p>{t.photosBody}</p>
+          </section>
+
+          <section>
+            <h3>{t.aboutPrivacyTitle}</h3>
+            <p>{t.aboutPrivacy}</p>
           </section>
 
           <section>
